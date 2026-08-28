@@ -54,9 +54,13 @@ create table if not exists public.user_logs (
   created_at timestamptz not null default now()
 );
 create index if not exists user_logs_user_idx on public.user_logs (user_id, created_at desc);
+-- performance: covering indexes for FKs (fixes unindexed_foreign_keys lint)
+create index if not exists user_services_user_id_idx on public.user_services (user_id);
+create index if not exists user_bookmarks_user_id_idx on public.user_bookmarks (user_id);
 
 -- ---------------------------------------------------------------------------
 -- RLS: her kullanıcı SADECE kendi satırlarını görür/düzenler
+-- performans: auth.uid() -> (select auth.uid()) ile sargı (auth_rls_initplan)
 -- ---------------------------------------------------------------------------
 alter table public.profiles enable row level security;
 alter table public.user_settings enable row level security;
@@ -67,57 +71,57 @@ alter table public.user_logs enable row level security;
 -- profiles: kullanıcı kendi profilini oku/güncelle; signup'ta insert (service_role ile)
 drop policy if exists "profiles_select_own" on public.profiles;
 create policy "profiles_select_own" on public.profiles
-  for select using (auth.uid() = id);
+  for select using ((select auth.uid()) = id);
 drop policy if exists "profiles_update_own" on public.profiles;
 create policy "profiles_update_own" on public.profiles
-  for update using (auth.uid() = id);
+  for update using ((select auth.uid()) = id);
 
 -- user_settings: own read/write
 drop policy if exists "settings_select_own" on public.user_settings;
 create policy "settings_select_own" on public.user_settings
-  for select using (auth.uid() = user_id);
+  for select using ((select auth.uid()) = user_id);
 drop policy if exists "settings_insert_own" on public.user_settings;
 create policy "settings_insert_own" on public.user_settings
-  for insert with check (auth.uid() = user_id);
+  for insert with check ((select auth.uid()) = user_id);
 drop policy if exists "settings_update_own" on public.user_settings;
 create policy "settings_update_own" on public.user_settings
-  for update using (auth.uid() = user_id);
+  for update using ((select auth.uid()) = user_id);
 
 -- user_services: own read/write
 drop policy if exists "services_select_own" on public.user_services;
 create policy "services_select_own" on public.user_services
-  for select using (auth.uid() = user_id);
+  for select using ((select auth.uid()) = user_id);
 drop policy if exists "services_insert_own" on public.user_services;
 create policy "services_insert_own" on public.user_services
-  for insert with check (auth.uid() = user_id);
+  for insert with check ((select auth.uid()) = user_id);
 drop policy if exists "services_update_own" on public.user_services;
 create policy "services_update_own" on public.user_services
-  for update using (auth.uid() = user_id);
+  for update using ((select auth.uid()) = user_id);
 drop policy if exists "services_delete_own" on public.user_services;
 create policy "services_delete_own" on public.user_services
-  for delete using (auth.uid() = user_id);
+  for delete using ((select auth.uid()) = user_id);
 
 -- user_bookmarks: own read/write
 drop policy if exists "bookmarks_select_own" on public.user_bookmarks;
 create policy "bookmarks_select_own" on public.user_bookmarks
-  for select using (auth.uid() = user_id);
+  for select using ((select auth.uid()) = user_id);
 drop policy if exists "bookmarks_insert_own" on public.user_bookmarks;
 create policy "bookmarks_insert_own" on public.user_bookmarks
-  for insert with check (auth.uid() = user_id);
+  for insert with check ((select auth.uid()) = user_id);
 drop policy if exists "bookmarks_update_own" on public.user_bookmarks;
 create policy "bookmarks_update_own" on public.user_bookmarks
-  for update using (auth.uid() = user_id);
+  for update using ((select auth.uid()) = user_id);
 drop policy if exists "bookmarks_delete_own" on public.user_bookmarks;
 create policy "bookmarks_delete_own" on public.user_bookmarks
-  for delete using (auth.uid() = user_id);
+  for delete using ((select auth.uid()) = user_id);
 
 -- user_logs: own read + insert (insert servis tarafından kullanıcı adına — auth.uid ile)
 drop policy if exists "logs_select_own" on public.user_logs;
 create policy "logs_select_own" on public.user_logs
-  for select using (auth.uid() = user_id);
+  for select using ((select auth.uid()) = user_id);
 drop policy if exists "logs_insert_own" on public.user_logs;
 create policy "logs_insert_own" on public.user_logs
-  for insert with check (auth.uid() = user_id);
+  for insert with check ((select auth.uid()) = user_id);
 
 -- İlk ayar satırı signup sonrası otomatik: trigger
 create or replace function public.handle_new_user()
@@ -136,3 +140,11 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
+
+-- security: trigger functions must not be callable via PostgREST RPC (anon/auth)
+revoke execute on function public.handle_new_user() from anon, authenticated, public;
+do $$ begin
+  if exists (select 1 from pg_proc where proname='rls_auto_enable' and pronamespace='public'::regnamespace) then
+    execute 'revoke execute on function public.rls_auto_enable() from anon, authenticated, public';
+  end if;
+end $$;
