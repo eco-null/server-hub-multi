@@ -1,0 +1,204 @@
+"""auth.py — Supabase Auth + Data REST bridge for Server Hub.
+
+Zero third-party dependencies: pure urllib. Replaces the single-user
+HUB_USER/HUB_PASSWORD auth with Supabase Auth (email + password, multi-user).
+
+Env vars:
+  SUPABASE_URL        e.g. https://xxxx.supabase.co
+  SUPABASE_ANON_KEY   publishable anon key (RLS-scoped)
+
+Architecture:
+  Browser -> Server Hub (session cookie) -> Supabase Auth/Data REST
+  The server holds the user's Supabase JWT in its session and proxies every
+  data request with it, so PostgREST RLS (auth.uid()) applies per user.
+"""
+
+import json
+import time
+import urllib.error
+import urllib.request
+
+MAX_BODY = 64 * 1024
+
+
+class SupabaseError(Exception):
+    """Raised when Supabase returns an error. .status holds HTTP code."""
+
+    def __init__(self, status, message):
+        super().__init__(message)
+        self.status = status
+
+
+class SupabaseClient:
+    """Minimal Supabase Auth + PostgREST client (stdlib only)."""
+
+    def __init__(self, url, anon_key):
+        self.auth_url = url.rstrip("/") + "/auth/v1"
+        self.rest_url = url.rstrip("/") + "/rest/v1"
+        self.anon_key = anon_key
+        self._connect_timeout = 20
+
+    # ---- HTTP helpers ----
+
+    def _request(self, url, method="GET", body=None, token=None, headers=None):
+        hdrs = {
+            "apikey": self.anon_key,
+            "Accept": "application/json",
+        }
+        if token:
+            hdrs["Authorization"] = "Bearer " + token
+        if body is not None:
+            hdrs["Content-Type"] = "application/json"
+        if headers:
+            hdrs.update(headers)
+        data = json.dumps(body).encode("utf-8") if body is not None else None
+        req = urllib.request.Request(url, data=data, headers=hdrs, method=method)
+        try:
+            with urllib.request.urlopen(req, timeout=self._connect_timeout) as resp:
+                raw = resp.read().decode("utf-8", "replace")
+                return json.loads(raw) if raw else None
+        except urllib.error.HTTPError as e:
+            try:
+                detail = json.loads(e.read().decode("utf-8", "replace"))
+            except Exception:
+                detail = {"message": str(e)}
+            raise SupabaseError(e.code, detail.get("message") or detail.get("error_description") or str(e)) from e
+
+    # ---- Auth ----
+
+    def sign_in(self, email, password):
+        """Email+password login. Returns session dict or raises SupabaseError."""
+        return self._request(
+            self.auth_url + "/token?grant_type=password",
+            method="POST",
+            body={"email": email, "password": password},
+        )
+
+    def refresh(self, refresh_token):
+        """Exchange refresh_token for a fresh access token (serverless-safe)."""
+        return self._request(
+            self.auth_url + "/token?grant_type=refresh_token",
+            method="POST",
+            body={"refresh_token": refresh_token},
+        )
+
+    def sign_up(self, email, password, username=None):
+        """Create account. Returns session dict (auto-confirmed or pending)."""
+        body = {"email": email, "password": password}
+        if username:
+            body["data"] = {"username": username}
+        return self._request(self.auth_url + "/signup", method="POST", body=body)
+
+    def sign_out(self, token):
+        """Invalidate the refresh token server-side (best effort)."""
+        try:
+            return self._request(
+                self.auth_url + "/logout",
+                method="POST",
+                token=token,
+                body={},
+            )
+        except SupabaseError:
+            return None
+
+    def get_user(self, token):
+        """Fetch user object for a JWT access token."""
+        return self._request(self.auth_url + "/user", token=token)
+
+    # ---- Data (PostgREST, RLS enforced via user JWT) ----
+
+    def select(self, table, token, query=""):
+        return self._request(self.rest_url + "/" + table + (query or ""), method="GET", token=token)
+
+    def insert(self, table, token, payload):
+        return self._request(
+            self.rest_url + "/" + table,
+            method="POST",
+            body=payload,
+            token=token,
+            headers={"Prefer": "return=representation"},
+        )
+
+    def update(self, table, token, payload, query=""):
+        return self._request(
+            self.rest_url + "/" + table + (query or ""),
+            method="PATCH",
+            body=payload,
+            token=token,
+            headers={"Prefer": "return=representation"},
+        )
+
+    def delete(self, table, token, query=""):
+        return self._request(
+            self.rest_url + "/" + table + (query or ""),
+            method="DELETE",
+            token=token,
+            headers={"Prefer": "return=representation"},
+        )
+
+    # ---- domain helpers (server-hub) ----
+
+    def list_services(self, token):
+        return self.select("user_services", token, "?select=*&order=created_at")
+
+    def list_bookmarks(self, token):
+        return self.select("user_bookmarks", token, "?select=*&order=created_at")
+
+    def get_settings(self, token):
+        rows = self.select("user_settings", token, "?select=*&limit=1")
+        if rows:
+            return rows[0]
+        return {"settings": {}, "layout": {}}
+
+    def save_settings(self, token, settings=None, layout=None, user_id=None):
+        payload = {"updated_at": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())}
+        if settings is not None:
+            payload["settings"] = settings
+        if layout is not None:
+            payload["layout"] = layout
+        try:
+            # PostgREST "UPDATE requires a WHERE clause" koruması: kendi satırını
+            # id'yle hedefle. RLS zaten auth.uid()==user_id zorlar (güvenlik).
+            where = ("?user_id=eq." + user_id) if user_id else ""
+            rows = self.update("user_settings", token, payload, where)
+            if rows:
+                return rows
+            # satır yok -> insert (trigger oluşturmadıysa; user_id biliniyorsa ekle)
+            ins = dict(payload)
+            if user_id:
+                ins["user_id"] = user_id
+            return self.insert("user_settings", token, ins)
+        except SupabaseError as e:
+            if e.status in (404, 406):
+                # no row yet -> insert
+                ins = dict(payload)
+                if user_id:
+                    ins["user_id"] = user_id
+                return self.insert("user_settings", token, ins)
+            raise
+
+    def log(self, token, level, source, message, details=None, user_id=None):
+        """Kullanıcıya özel hata/çakışma logu (sadece ERROR/WARN/CONFLICT).
+
+        user_id payload'a eklenmeli: RLS insert policy
+        ``with check (auth.uid() = user_id)`` yüzünden eksikse insert sessizce
+        reddedilir.
+        """
+        if level not in ("ERROR", "WARN", "CONFLICT"):
+            return None
+        payload = {"level": level, "source": source, "message": message}
+        if user_id:
+            payload["user_id"] = user_id
+        if details is not None:
+            payload["details"] = details
+        try:
+            return self.insert("user_logs", token, payload)
+        except SupabaseError:
+            return None  # logging must never break the request
+
+    def list_logs(self, token, limit=50):
+        """Kullanıcının kendi loglarını listele (RLS filtreli)."""
+        try:
+            return self.select("user_logs", token, "?select=level,source,message,details,created_at&order=created_at.desc&limit=%d" % limit)
+        except SupabaseError:
+            return []

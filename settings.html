@@ -1,0 +1,1293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Settings — Server Hub</title>
+  <link rel="icon" type="image/png" href="logo.png" />
+  <link rel="preconnect" href="https://cdn.tailwindcss.com" crossorigin />
+  <link rel="preconnect" href="https://images.pexels.com" crossorigin />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <script>
+    tailwind.config = { darkMode: 'class', theme: { extend: {
+      fontFamily: {
+        sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        mono: ['Fira Code', 'ui-monospace', 'monospace'],
+      },
+    }}};
+  </script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+  <script src="settings.js"></script>
+  <script src="categorize.js"></script>
+  <style>
+    :root {
+      --bg-deep: #020203; --bg-elev: #0a0a0c;
+      --surface: rgba(255,255,255,0.05); --surface-hi: rgba(255,255,255,0.08);
+      --border: rgba(255,255,255,0.08); --border-hi: rgba(255,255,255,0.16);
+      --fg: #EDEDEF; --fg-muted: #8A8F98;
+      --accent: #5E6AD2; --accent-glow: rgba(94,106,210,0.20);
+      --green: #22C55E; --red: #EF4444;
+      --ease: cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    html.light {
+      --bg-deep: #f4f6fb; --bg-elev: #fbfcfe;
+      --surface: rgba(15,23,42,0.04); --surface-hi: rgba(15,23,42,0.08);
+      --border: rgba(15,23,42,0.10); --border-hi: rgba(15,23,42,0.20);
+      --fg: #0F172A; --fg-muted: #5a6072;
+      --accent: #4f56c0; --accent-glow: rgba(79,86,192,0.18);
+      --green: #16a34a; --red: #dc2626;
+    }
+    html, body { background-color: var(--bg-deep); color: var(--fg); }
+    body {
+      background:
+        radial-gradient(1000px 600px at 80% -10%, var(--accent-glow), transparent 60%),
+        linear-gradient(180deg, var(--bg-elev), var(--bg-deep));
+      min-height: 100vh;
+      transition: background-color 400ms var(--ease), color 400ms var(--ease);
+    }
+    /* Wallpaper readability — html.wallpaper-light / html.wallpaper-dark
+       toggled by HubSettings.applyWallpaper (settings.js). Keeps glass + text
+       readable over any wallpaper; .wallpaper is set on <body>. The body's own
+       opaque gradient is cleared so the fixed #wallpaper layer shows through. */
+    html.wallpaper-light { --surface: rgba(255,255,255,0.75); --surface-hi: rgba(255,255,255,0.85); --border: rgba(0,0,0,0.12); --border-hi: rgba(0,0,0,0.2); --fg: #111318; --fg-muted: #3d4148; }
+    html.wallpaper-light .glass { backdrop-filter: blur(14px); }
+    html.wallpaper-dark { --surface: rgba(0,0,0,0.55); --surface-hi: rgba(0,0,0,0.65); --border: rgba(255,255,255,0.1); --border-hi: rgba(255,255,255,0.18); --fg: #EDEDEF; --fg-muted: #A7ABB3; }
+    html.wallpaper-dark .glass { backdrop-filter: blur(14px); }
+    /* Light theme wins over wallpaper readability classes (see index.html). */
+    html.light.wallpaper-dark,
+    html.light.wallpaper-light {
+      --surface: rgba(255,255,255,0.92); --surface-hi: rgba(255,255,255,0.96);
+      --border: rgba(15,23,42,0.12); --border-hi: rgba(15,23,42,0.20);
+      --fg: #0F172A; --fg-muted: #5a6072;
+    }
+    html.light.wallpaper-dark .glass,
+    html.light.wallpaper-light .glass { backdrop-filter: blur(16px); }
+    html.wallpaper .glass, body.wallpaper .glass { box-shadow: 0 4px 24px -8px rgba(0,0,0,0.35); }
+    body.wallpaper { background-color: transparent; background-image: none; }
+    html.wallpaper-dark, html.wallpaper-light { background-color: transparent; }
+
+    /* Wallpaper layer — fixed, viewport-sized, behind content (z-index -1).
+       `cover` is computed against the viewport, so navigating or content
+       height changes never re-scale the image (no zoom); opacity cross-fades
+       smoothly via the wp-active class. */
+    #wallpaper {
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      pointer-events: none;
+      background-image: var(--wp-image, none);
+      background-size: cover;
+      background-position: center;
+      background-repeat: no-repeat;
+      opacity: 0;
+      transition: opacity 700ms var(--ease);
+    }
+    body.wallpaper.wp-active #wallpaper {
+      opacity: 1;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #wallpaper { transition: none; }
+    }
+    .glass {
+      background: var(--surface);
+      backdrop-filter: blur(18px) saturate(140%);
+      -webkit-backdrop-filter: blur(18px) saturate(140%);
+      border: 1px solid var(--border); border-radius: 16px;
+      transition: background-color 300ms var(--ease), border-color 300ms var(--ease);
+      isolation: isolate;
+    }
+    .section {
+      animation: section-in 360ms var(--ease) both;
+    }
+    .section:nth-child(2) { animation-delay: 40ms; }
+    .section:nth-child(3) { animation-delay: 80ms; }
+    .section:nth-child(4) { animation-delay: 120ms; }
+    .section:nth-child(5) { animation-delay: 160ms; }
+    .section:nth-child(6) { animation-delay: 200ms; }
+    @keyframes section-in {
+      from { opacity: 0; transform: translateY(10px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .field {
+      background: transparent; border: 1px solid var(--border); border-radius: 10px;
+      color: var(--fg); padding: 0.55rem 0.75rem; font-size: 0.875rem; width: 100%;
+      transition: border-color 200ms var(--ease), background-color 200ms var(--ease);
+    }
+    .field:focus { outline: none; border-color: var(--accent); background: var(--surface); }
+    .field::placeholder { color: var(--fg-muted); }
+    .btn {
+      padding: 0.5rem 1rem; border-radius: 10px; font-size: 0.875rem; font-weight: 500;
+      cursor: pointer; border: 1px solid var(--border); background: var(--surface); color: var(--fg);
+      transition: background-color 200ms var(--ease), border-color 200ms var(--ease), transform 150ms var(--ease);
+    }
+    .btn:hover { background: var(--surface-hi); border-color: var(--border-hi); }
+    .btn:active { transform: scale(0.98); }
+    .btn-primary { background: var(--accent); color: white; border-color: transparent; }
+    .btn-primary:hover { background: color-mix(in srgb, var(--accent) 88%, white); }
+    .btn-danger { color: var(--red); border-color: color-mix(in srgb, var(--red) 40%, var(--border)); }
+    .btn-danger:hover { background: color-mix(in srgb, var(--red) 12%, var(--surface)); }
+    .section { padding: 1.25rem; }
+    .h2 { font-size: 0.75rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-muted); }
+    .switch {
+      position: relative; width: 42px; height: 24px; border-radius: 9999px;
+      background: var(--surface-hi); border: 1px solid var(--border); cursor: pointer;
+      transition: background-color 200ms var(--ease); flex-shrink: 0;
+    }
+    .switch.on { background: var(--accent); border-color: transparent; }
+    .switch::after {
+      content: ''; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px;
+      background: var(--fg); border-radius: 9999px; transition: transform 200ms var(--ease);
+    }
+    .switch.on::after { transform: translateX(18px); background: white; }
+    .swatch {
+      width: 28px; height: 28px; border-radius: 8px; cursor: pointer;
+      border: 2px solid transparent; transition: transform 150ms var(--ease), border-color 150ms var(--ease);
+    }
+    .swatch:hover { transform: scale(1.1); }
+    .swatch.active { border-color: var(--fg); }
+    .pill {
+      display: inline-block; padding: 2px 8px; border-radius: 9999px;
+      font-size: 11px; font-family: 'Fira Code', monospace;
+      border: 1px solid var(--border); color: var(--fg-muted); background: var(--surface);
+    }
+    .toast {
+      position: fixed; bottom: 1.5rem; left: 50%; transform: translateX(-50%);
+      padding: 0.6rem 1.1rem; border-radius: 10px; font-size: 0.85rem;
+      background: var(--accent); color: white; box-shadow: 0 8px 24px -8px var(--accent-glow);
+      opacity: 0; pointer-events: none; transition: opacity 300ms var(--ease), transform 300ms var(--ease);
+      z-index: 50;
+    }
+    .toast.show { opacity: 1; transform: translate(-50%, -8px); }
+    .row-grid { display: grid; gap: 0.65rem; }
+    .focus-ring:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .svc-row {
+      display: grid; grid-template-columns: 1.4fr 1.6fr 1.6fr auto auto auto; gap: 8px; align-items: center;
+    }
+    .svc-color { width: 2.25rem; height: 2rem; padding: 0; border: 1px solid var(--border); border-radius: 8px; background: transparent; cursor: pointer; }
+    @media (max-width: 720px) { .svc-row { grid-template-columns: 1fr; } .svc-row .hide-sm { display: none; } }
+    @media (prefers-reduced-motion: reduce) { * { transition: none !important; } .section { animation: none; } }
+    @media (max-width: 768px), (pointer: coarse), (hover: none) {
+      .glass,
+      html.wallpaper-light .glass,
+      html.wallpaper-dark .glass {
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+      }
+      .section { animation: none !important; }
+      .btn:hover, .swatch:hover { transform: none !important; }
+    }
+  </style>
+</head>
+<body class="font-sans antialiased">
+  <div id="wallpaper" aria-hidden="true"></div>
+  <main class="mx-auto w-full max-w-3xl px-4 sm:px-6 py-10 space-y-6">
+
+    <header class="flex items-center justify-between gap-3">
+      <div>
+        <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">Settings</h1>
+        <p class="text-sm text-[color:var(--fg-muted)] mt-1">Personalize Server Hub. Saved to your browser (localStorage) — no server required.</p>
+      </div>
+      <a href="index.html" class="btn focus-ring" aria-label="Back to dashboard">← Back</a>
+    </header>
+
+    <!-- Appearance -->
+    <section class="glass section">
+      <h2 class="h2 mb-4">Appearance</h2>
+
+      <!-- Theme -->
+      <div class="row-grid">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="font-medium text-sm">Theme</p>
+            <p class="text-xs text-[color:var(--fg-muted)]">Auto follows your system preference.</p>
+          </div>
+          <div class="flex gap-2" role="radiogroup" aria-label="Theme">
+            <button class="btn theme-opt focus-ring" data-theme="auto">Auto</button>
+            <button class="btn theme-opt focus-ring" data-theme="light">Light</button>
+            <button class="btn theme-opt focus-ring" data-theme="dark">Dark</button>
+          </div>
+        </div>
+
+        <!-- Accent color -->
+        <div class="flex items-center justify-between pt-2">
+          <div>
+            <p class="font-medium text-sm">Accent color</p>
+            <p class="text-xs text-[color:var(--fg-muted)]">Used for buttons, bars, and the FAB.</p>
+          </div>
+          <div class="flex items-center gap-2 flex-wrap justify-end">
+            <div class="flex gap-1.5" id="swatches" role="group" aria-label="Accent presets"></div>
+            <label class="flex items-center gap-1.5">
+              <input id="accent-custom" type="color" class="w-9 h-9 rounded-lg cursor-pointer border-0 bg-transparent focus-ring" aria-label="Custom accent color" />
+              <span class="text-xs text-[color:var(--fg-muted)]">custom</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Wallpaper -->
+        <div class="flex items-center justify-between pt-2">
+          <div>
+            <p class="font-medium text-sm">Wallpaper</p>
+            <p class="text-xs text-[color:var(--fg-muted)]">Choose a background for the dashboard. Changes preview live.</p>
+          </div>
+          <div class="flex items-center gap-2 flex-wrap justify-end">
+            <button id="wp-none" class="btn focus-ring" aria-pressed="false">None</button>
+            <div class="flex gap-1.5" id="wp-gradients" role="group" aria-label="Wallpaper gradients"></div>
+          </div>
+        </div>
+        <div class="flex items-center justify-between pt-2">
+          <div>
+            <p class="font-medium text-sm">Featured</p>
+            <p class="text-xs text-[color:var(--fg-muted)]">One-click preset — no URL needed.</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button id="wp-preset-pexels" class="swatch focus-ring" style="width:64px;height:40px;background: url('https://images.pexels.com/photos/2387819/pexels-photo-2387819.jpeg') center/cover no-repeat" aria-label="Use Pexels mountain wallpaper" title="Pexels — Mountain (click to apply)"></button>
+            <span class="text-xs text-[color:var(--fg-muted)] hidden sm:inline">Pexels Mountain</span>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 pt-2">
+          <input id="wp-url" class="field focus-ring flex-1" type="text" placeholder="Custom image URL (https://…)" aria-label="Custom wallpaper URL" />
+          <button id="wp-apply" class="btn btn-primary focus-ring text-xs">Apply</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Personalization -->
+    <section class="glass section">
+      <h2 class="h2 mb-4">Personalization</h2>
+      <div class="row-grid">
+        <label class="block">
+          <span class="text-sm font-medium">Your name <span class="text-[color:var(--fg-muted)] text-xs">(optional, shown in greeting)</span></span>
+          <input id="user-name" class="field mt-1.5" placeholder="e.g. Can" autocomplete="off" />
+        </label>
+        <label class="block">
+          <span class="text-sm font-medium">Page title</span>
+          <input id="page-title" class="field mt-1.5" placeholder="Server Hub" maxlength="60" />
+        </label>
+        <label class="block">
+          <span class="text-sm font-medium">Subtitle</span>
+          <input id="subtitle" class="field mt-1.5" placeholder="Your self-hosted apps…" maxlength="120" />
+        </label>
+      </div>
+      <div class="flex items-center justify-between pt-2">
+        <div>
+          <p class="font-medium text-sm">Default domain</p>
+          <p class="text-xs text-[color:var(--fg-muted)]">A bare subdomain in the add form is expanded with this domain (e.g. "n8n" → "n8n.&lt;domain&gt;").</p>
+        </div>
+        <input id="default-domain" class="field focus-ring w-56" placeholder="example.com" />
+      </div>
+    </section>
+
+    <!-- Features -->
+    <section class="glass section">
+      <h2 class="h2 mb-4">Features</h2>
+      <div class="space-y-3" id="feature-list">
+        <!-- Rendered by JS -->
+      </div>
+
+      <!-- System stats source (Beszel) -->
+      <div class="pt-3 mt-3 border-t border-[color:var(--border)]">
+        <div class="flex items-center justify-between gap-3">
+          <div class="min-w-0">
+            <p class="text-sm font-medium">System stats source</p>
+            <p id="beszel-status" class="text-xs text-[color:var(--fg-muted)] mt-0.5">Checking Beszel…</p>
+          </div>
+          <button id="beszel-test" class="btn focus-ring text-xs shrink-0">Test connection</button>
+        </div>
+        <div class="grid gap-3 mt-3">
+          <label class="block">
+            <span class="text-xs text-[color:var(--fg-muted)]">Beszel URL</span>
+            <input id="beszel-url" class="field mt-1.5" type="text" placeholder="https://beszel.example.com" autocomplete="off" inputmode="url" />
+          </label>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label class="block">
+              <span class="text-xs text-[color:var(--fg-muted)]">Username</span>
+              <input id="beszel-user" class="field mt-1.5" type="text" placeholder="admin" autocomplete="username" />
+            </label>
+            <label class="block">
+              <span class="text-xs text-[color:var(--fg-muted)]">Password</span>
+              <input id="beszel-password" class="field mt-1.5" type="password" placeholder="••••••••" autocomplete="current-password" />
+            </label>
+          </div>
+        </div>
+        <p class="text-xs text-[color:var(--fg-muted)] mt-2">
+          Your Beszel credentials are stored encrypted in your own settings
+          (Supabase, per-user) — never in the browser or shared with others.
+          Leave empty to keep using the server-wide env config
+          (<code class="text-[color:var(--fg)]">BESZEL_URL</code>).
+        </p>
+      </div>
+    </section>
+
+    <!-- Search provider -->
+    <section class="glass section">
+      <h2 class="h2 mb-4">Search</h2>
+      <div class="row-grid">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="font-medium text-sm">Web search provider</p>
+            <p class="text-xs text-[color:var(--fg-muted)]">Used when you press Enter in the search popup.</p>
+          </div>
+          <select id="search-provider" class="field focus-ring w-48">
+            <option value="google">Google</option>
+            <option value="ddg">DuckDuckGo</option>
+            <option value="bing">Bing</option>
+            <option value="startpage">Startpage</option>
+            <option value="searxng">SearXNG</option>
+          </select>
+        </div>
+        <div class="flex items-center justify-between" id="searxng-row" style="display:none">
+          <div>
+            <p class="font-medium text-sm">SearXNG URL</p>
+            <p class="text-xs text-[color:var(--fg-muted)]">e.g. https://searx.yourdomain.com</p>
+          </div>
+          <input id="searxng-url" class="field focus-ring w-64" placeholder="https://searx.example.com" />
+        </div>
+      </div>
+    </section>
+
+    <!-- Services editor -->
+    <section class="glass section">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="h2">Your links</h2>
+        <button id="add-svc" class="btn btn-primary focus-ring text-xs">+ Add link</button>
+      </div>
+      <p class="text-xs text-[color:var(--fg-muted)] mb-4">Links are stored permanently on the server (<code class="text-[color:var(--fg)]">services.json</code>) and shared across all devices.</p>
+
+      <div id="svc-list" class="space-y-2"></div>
+
+      <!-- Add new link form (collapsible) -->
+      <div id="add-form" class="hidden mt-4 pt-4 border-t border-[color:var(--border)]">
+        <div class="svc-row">
+          <input id="new-name" class="field focus-ring" placeholder="Name (e.g. Grafana)" />
+          <div class="flex gap-1 min-w-0">
+            <select id="new-scheme" class="field focus-ring w-28 shrink-0" aria-label="URL scheme">
+              <option value="https://" selected>https://</option>
+              <option value="http://">http://</option>
+            </select>
+            <input id="new-url"  class="field focus-ring min-w-0 flex-1" type="text" placeholder="host (e.g. immich.canzodal.com)" />
+          </div>
+          <input id="new-desc" class="field focus-ring" placeholder="Description (optional)" />
+          <span class="hide-sm text-xs text-[color:var(--fg-muted)]">→ <span id="new-cat" class="pill">auto</span></span>
+          <button id="new-save" class="btn btn-primary focus-ring text-xs">Add</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Bookmarks editor -->
+    <section class="glass section">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="h2">Bookmarks</h2>
+        <button id="add-bm" class="btn btn-primary focus-ring text-xs">+ Add bookmark</button>
+      </div>
+      <p class="text-xs text-[color:var(--fg-muted)] mb-4">Bookmarks are stored permanently on the server (<code class="text-[color:var(--fg)]">services.json</code>) and shown on your dashboard.</p>
+
+      <div id="bm-list" class="space-y-2"></div>
+
+      <!-- Add new bookmark form (collapsible) -->
+      <div id="bm-add-form" class="hidden mt-4 pt-4 border-t border-[color:var(--border)]">
+        <div class="svc-row">
+          <input id="bm-new-name" class="field focus-ring" placeholder="Name (e.g. YouTube)" />
+          <input id="bm-new-url"  class="field focus-ring" type="text" placeholder="URL (e.g. https://youtube.com)" />
+          <input id="bm-new-color" class="field focus-ring" type="color" value="#5E6AD2" title="Dot color" />
+          <button id="bm-save" class="btn btn-primary focus-ring text-xs">Add</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Backup -->
+    <section class="glass section">
+      <h2 class="h2 mb-4">Two-factor authentication</h2>
+      <div class="flex items-center justify-between gap-3 flex-wrap">
+        <div class="min-w-0">
+          <p class="text-sm font-medium">Authenticator app (TOTP)</p>
+          <p id="twofa-status" class="text-xs text-[color:var(--fg-muted)] mt-0.5">Checking…</p>
+        </div>
+        <div class="flex gap-2">
+          <button id="twofa-enable" class="btn focus-ring text-xs hidden">Set up</button>
+          <button id="twofa-disable" class="btn btn-danger focus-ring text-xs hidden">Disable</button>
+        </div>
+      </div>
+      <div id="twofa-setup" class="hidden mt-4 pt-4 border-t border-[color:var(--border)]">
+        <p class="text-sm text-[color:var(--fg-muted)] mb-3">Scan the QR code with your authenticator app (Google Authenticator, Aegis, 1Password…), then enter the 6-digit code to confirm.</p>
+        <div class="flex flex-col sm:flex-row gap-4 items-start">
+          <div id="twofa-qr" class="bg-white rounded-xl p-3 shrink-0"></div>
+          <div class="w-full max-w-xs space-y-3">
+            <div>
+              <p class="text-xs text-[color:var(--fg-muted)] mb-1">Or enter this key manually</p>
+              <code id="twofa-secret" class="block text-xs break-all px-2 py-1.5 rounded-lg bg-[color:var(--surface-hi)]"></code>
+            </div>
+            <label class="block">
+              <span class="text-xs text-[color:var(--fg-muted)]">Verification code</span>
+              <input id="twofa-code" class="field mt-1.5" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="one-time-code" />
+            </label>
+            <button id="twofa-confirm" class="btn btn-primary focus-ring w-full">Confirm & enable</button>
+          </div>
+        </div>
+      </div>
+      <div id="twofa-off" class="hidden mt-3">
+        <p class="text-xs text-[color:var(--fg-muted)]">Optional protection — nobody is forced to use it. <button id="twofa-start" class="underline hover:text-[color:var(--accent)] cursor-pointer">Enable 2FA →</button></p>
+      </div>
+      <div id="twofa-on" class="hidden mt-3">
+        <p class="text-xs text-[color:var(--fg-muted)]">2FA is <span class="text-[color:var(--green)] font-medium">enabled</span> — every sign-in requires a code from your authenticator app.</p>
+      </div>
+    </section>
+
+    <!-- Backup -->
+    <section class="glass section">
+      <h2 class="h2 mb-4">Backup</h2>
+      <div class="flex items-center justify-between gap-3 flex-wrap">
+        <p class="text-sm text-[color:var(--fg-muted)] max-w-md">Export all settings, links, and bookmarks to a JSON file. Import to restore after an update.</p>
+        <div class="flex gap-2">
+          <button id="export-btn" class="btn focus-ring text-xs">Export</button>
+          <label class="btn focus-ring text-xs cursor-pointer">
+            Import
+            <input id="import-input" type="file" accept="application/json,.json" class="hidden" />
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <!-- Danger zone -->
+    <section class="glass section">
+      <h2 class="h2 mb-3">Reset</h2>
+      <div class="flex items-center justify-between gap-3 flex-wrap">
+        <p class="text-sm text-[color:var(--fg-muted)] max-w-md">Wipe all settings (theme, accent, features). Links live on the server and are managed here.</p>
+        <button id="reset" class="btn btn-danger focus-ring">Reset all settings</button>
+      </div>
+    </section>
+
+    <footer class="pt-2 pb-8 text-center text-xs text-[color:var(--fg-muted)] font-mono">
+      Powered by <a href="https://github.com/eco-null/server-hub-multi" class="underline hover:text-[color:var(--accent)]" target="_blank" rel="noopener">Server Hub</a>
+    </footer>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite">Saved</div>
+
+<script>
+  /* ============================================================
+     Wire settings UI to HubSettings
+     ============================================================ */
+  const S = window.HubSettings;
+  const cur = S.get();
+
+  // Apply theme + accent to THIS page so previews match
+  S.apply(cur);
+
+  const ACCENT_PRESETS = ['#5E6AD2', '#22C55E', '#EAB308', '#F97316', '#EF4444', '#EC4899', '#8B5CF6', '#14B8A6', '#0EA5E9', '#64748B'];
+
+  function setThemeOpt(mode) {
+    document.querySelectorAll('.theme-opt').forEach(b => {
+      b.classList.toggle('btn-primary', b.dataset.theme === mode);
+      b.setAttribute('aria-pressed', String(b.dataset.theme === mode));
+    });
+    S.set({ theme: mode });
+    S.apply(S.get()); // refresh tokens on this page too
+  }
+  document.querySelectorAll('.theme-opt').forEach(b => {
+    b.addEventListener('click', () => setThemeOpt(b.dataset.theme));
+  });
+  setThemeOpt(cur.theme);
+
+  // Accent swatches
+  const swatchEl = document.getElementById('swatches');
+  ACCENT_PRESETS.forEach(c => {
+    const s = document.createElement('button');
+    s.className = 'swatch focus-ring';
+    s.style.background = c;
+    s.setAttribute('aria-label', 'Accent ' + c);
+    s.dataset.color = c;
+    s.addEventListener('click', () => { S.set({ accent: c }); refreshAccent(); toast('Accent updated'); });
+    swatchEl.appendChild(s);
+  });
+  const customInput = document.getElementById('accent-custom');
+  customInput.value = cur.accent;
+  customInput.addEventListener('input', e => { S.set({ accent: e.target.value }); refreshAccent(); });
+  function refreshAccent() {
+    const a = S.get().accent;
+    document.querySelectorAll('#swatches .swatch').forEach(s => s.classList.toggle('active', s.dataset.color.toLowerCase() === a.toLowerCase()));
+    document.documentElement.style.setProperty('--accent', a);
+    customInput.value = a;
+  }
+  refreshAccent();
+
+  // Wallpaper
+  const PEXELS_PRESET = 'https://images.pexels.com/photos/2387819/pexels-photo-2387819.jpeg';
+  const wpGradientsEl = document.getElementById('wp-gradients');
+  const wpNoneBtn     = document.getElementById('wp-none');
+  const wpUrlInput    = document.getElementById('wp-url');
+  const wpApplyBtn    = document.getElementById('wp-apply');
+  const wpPexelsBtn   = document.getElementById('wp-preset-pexels');
+
+  Object.keys(S.GRADIENTS || {}).forEach(k => {
+    const s = document.createElement('button');
+    s.className = 'swatch focus-ring wp-grad';
+    s.style.background = S.GRADIENTS[k];
+    s.setAttribute('aria-label', 'Gradient wallpaper ' + k);
+    s.setAttribute('aria-pressed', 'false');
+    s.dataset.gradient = k;
+    s.title = k;
+    s.addEventListener('click', () => {
+      S.set({ wallpaper: { mode: 'gradient', gradient: k } });
+      refreshWallpaper();
+      toast('Wallpaper: ' + k);
+    });
+    wpGradientsEl.appendChild(s);
+  });
+
+  wpNoneBtn.addEventListener('click', () => {
+    S.set({ wallpaper: { mode: 'none' } });
+    refreshWallpaper();
+    toast('Wallpaper: none');
+  });
+
+  wpApplyBtn.addEventListener('click', () => {
+    S.set({ wallpaper: { mode: 'custom', url: wpUrlInput.value.trim() } });
+    refreshWallpaper();
+    toast('Wallpaper applied');
+  });
+
+  if (wpPexelsBtn) {
+    wpPexelsBtn.addEventListener('click', () => {
+      S.set({ wallpaper: { mode: 'custom', url: PEXELS_PRESET } });
+      wpUrlInput.value = PEXELS_PRESET;
+      refreshWallpaper();
+      toast('Wallpaper: Pexels Mountain');
+    });
+  }
+
+  wpUrlInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') wpApplyBtn.click();
+  });
+
+  function refreshWallpaper() {
+    const w = S.get().wallpaper || { mode: 'none' };
+    const mode = w.mode || 'none';
+    wpNoneBtn.classList.toggle('btn-primary', mode === 'none');
+    wpNoneBtn.setAttribute('aria-pressed', String(mode === 'none'));
+    wpGradientsEl.querySelectorAll('.wp-grad').forEach(s => {
+      const active = mode === 'gradient' && s.dataset.gradient === w.gradient;
+      s.classList.toggle('active', active);
+      s.setAttribute('aria-pressed', String(active));
+    });
+    const isPexels = mode === 'custom' && w.url === PEXELS_PRESET;
+    if (wpPexelsBtn) {
+      wpPexelsBtn.classList.toggle('active', isPexels);
+      wpPexelsBtn.setAttribute('aria-pressed', String(isPexels));
+    }
+    if (mode === 'custom' && w.url) wpUrlInput.value = w.url;
+    else if (!isPexels && mode !== 'custom') {
+      // keep input as-is when switching to gradient/none; no clear needed
+    }
+    S.apply(S.get());
+    window.HubSettings.applyWallpaper(S.get());
+  }
+  refreshWallpaper();
+
+  // Personalization fields
+  const nameInput = document.getElementById('user-name');
+  const titleInput = document.getElementById('page-title');
+  const subInput = document.getElementById('subtitle');
+  nameInput.value  = cur.userName;
+  titleInput.value = cur.pageTitle;
+  subInput.value   = cur.subtitle;
+  nameInput.addEventListener('input',  e => S.set({ userName:  e.target.value }));
+  titleInput.addEventListener('input', e => S.set({ pageTitle: e.target.value }));
+  subInput.addEventListener('input',   e => S.set({ subtitle:  e.target.value }));
+
+  const domainInput = document.getElementById('default-domain');
+  domainInput.value = cur.defaultDomain || '';
+  domainInput.addEventListener('input', e => S.set({ defaultDomain: e.target.value.trim() }));
+
+  // Search provider
+  const searchProvider = document.getElementById('search-provider');
+  const searxngRow = document.getElementById('searxng-row');
+  const searxngUrl = document.getElementById('searxng-url');
+  const curSearch = cur.search || {};
+  searchProvider.value = curSearch.provider || 'google';
+  searxngUrl.value = curSearch.searxngUrl || '';
+  const toggleSearxng = () => { searxngRow.style.display = searchProvider.value === 'searxng' ? '' : 'none'; };
+  searchProvider.addEventListener('change', () => { S.set({ search: { provider: searchProvider.value, searxngUrl: searxngUrl.value.trim() } }); toggleSearxng(); });
+  searxngUrl.addEventListener('input', () => S.set({ search: { provider: searchProvider.value, searxngUrl: searxngUrl.value.trim() } }));
+  toggleSearxng();
+
+  // Features toggles
+  const FEATURE_META = [
+    { key: 'clock',      label: 'Clock & date',          desc: 'Show current time and date in the header.' },
+    { key: 'greeting',   label: 'Greeting',              desc: 'Show personalized "Good morning, …" line.' },
+    { key: 'stats',      label: 'System stats widget',   desc: 'CPU / Memory / Disk bars (requires /api/stats).' },
+    { key: 'search',     label: 'Search & filter',       desc: 'Filter box to find a service by name.' },
+    { key: 'statusPings',label: 'Status indicators',    desc: 'Ping each service to show up/down dots.' },
+    { key: 'blobs',      label: 'Ambient blobs',         desc: 'Decorative gradient blobs in the background.' },
+    { key: 'beszelUptime', label: 'Beszel uptime',       desc: 'Show each server’s uptime next to its status.' },
+  ];
+  const featureList = document.getElementById('feature-list');
+  function renderFeatures() {
+    const f = S.get().features;
+    featureList.innerHTML = '';
+    for (const meta of FEATURE_META) {
+      const row = document.createElement('div');
+      row.className = 'flex items-center justify-between gap-3';
+      row.innerHTML =
+        '<div class="min-w-0"><p class="text-sm font-medium">' + meta.label + '</p>'
+        + '<p class="text-xs text-[color:var(--fg-muted)]">' + meta.desc + '</p></div>'
+        + '<button class="switch focus-ring ' + (f[meta.key] ? 'on' : '') + '" data-feat="' + meta.key + '" '
+        + 'role="switch" aria-checked="' + (f[meta.key] ? 'true' : 'false') + '" aria-label="Toggle ' + meta.label + '"></button>';
+      featureList.appendChild(row);
+    }
+    featureList.querySelectorAll('.switch').forEach(sw => {
+      sw.addEventListener('click', () => {
+        const k = sw.dataset.feat;
+        const next = !S.get().features[k];
+        S.set({ features: { ...S.get().features, [k]: next } });
+        sw.classList.toggle('on', next);
+        sw.setAttribute('aria-checked', String(next));
+        toast(next ? meta(k) + ' on' : meta(k) + ' off');
+      });
+      function meta(k) { return FEATURE_META.find(m => m.key === k).label; }
+    });
+  }
+  renderFeatures();
+
+  /* ============================================================
+     Beszel connection status + test (server-side env config)
+     ============================================================ */
+  const beszelStatusEl = document.getElementById('beszel-status');
+  const beszelTestBtn  = document.getElementById('beszel-test');
+  const beszelUrl      = document.getElementById('beszel-url');
+  const beszelUser     = document.getElementById('beszel-user');
+  const beszelPassword = document.getElementById('beszel-password');
+  const BESZEL_TONES = ['text-[color:var(--green)]', 'text-[color:var(--red)]'];
+
+  // Güvenli JSON: server HTML/empty dönerse (ör. Vercel 504) anlamlı hata ver.
+  async function safeJson(r) {
+    const text = await r.text();
+    try { return JSON.parse(text); }
+    catch {
+      throw new Error('server returned ' + r.status + ' (not JSON) — ' + text.slice(0, 80));
+    }
+  }
+
+  // Load per-user Beszel credentials from server-side settings into the form
+  // (password stays blank — stored value is only used by the server; blank
+  // means "keep saved password").
+  (async () => {
+    try {
+      const r = await fetch('/api/settings', { headers: { 'Accept': 'application/json' } });
+      if (r.ok) {
+        const d = await safeJson(r);
+        const b = (d.settings && d.settings.beszel) || {};
+        if (b.url)  beszelUrl.value = b.url;
+        if (b.user) beszelUser.value = b.user;
+      }
+    } catch {}
+    checkBeszel(false);
+  })();
+
+  function setBeszelStatus(text, tone) {
+    beszelStatusEl.classList.remove(...BESZEL_TONES);
+    if (tone === 'ok') beszelStatusEl.classList.add('text-[color:var(--green)]');
+    if (tone === 'bad') beszelStatusEl.classList.add('text-[color:var(--red)]');
+    beszelStatusEl.textContent = text;
+  }
+
+  async function checkBeszel(showToast) {
+    // Kaydedilmemiş form değerlerini geçici test: server'a formdaki
+    // credentials ile istek at — settings'ten bağımsız doğrulama.
+    const testUrl = beszelUrl.value.trim();
+    const msgEl = beszelStatusEl;
+    beszelTestBtn.disabled = true;
+    msgEl.textContent = 'Checking Beszel…';
+    let msg = '';
+    try {
+      if (testUrl) {
+        const r = await fetch('/api/beszel', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            url: testUrl,
+            user: beszelUser.value.trim(),
+            password: beszelPassword.value,
+          }),
+        });
+        const d = await safeJson(r);
+        if (!r.ok) throw new Error(d.error || 'request failed (' + r.status + ')');
+        if (d.enabled && d.error) {
+          msg = 'Beszel: error — ' + d.error;
+          setBeszelStatus(msg, 'bad');
+        } else if (d.enabled) {
+          const n = (d.systems || []).length;
+          msg = 'Beszel: connected — ' + n + ' server' + (n === 1 ? '' : 's');
+          setBeszelStatus(msg, 'ok');
+        } else {
+          msg = 'Beszel: not configured';
+          setBeszelStatus(msg, 'info');
+        }
+      } else {
+        const r = await fetch('/api/beszel', { cache: 'no-store' });
+        const d = await safeJson(r);
+        if (!r.ok) throw new Error(d.error || 'request failed (' + r.status + ')');
+        if (d.enabled && d.error) {
+          msg = 'Beszel: error — ' + d.error;
+          setBeszelStatus(msg, 'bad');
+        } else if (d.enabled) {
+          const n = (d.systems || []).length;
+          msg = 'Beszel: connected — ' + n + ' server' + (n === 1 ? '' : 's');
+          setBeszelStatus(msg, 'ok');
+        } else {
+          msg = 'Beszel: not configured (add your Beszel URL above)' ;
+          setBeszelStatus(msg, 'info');
+        }
+      }
+    } catch (err) {
+      msg = 'Beszel: error — ' + err.message;
+      setBeszelStatus(msg, 'bad');
+    } finally {
+      beszelTestBtn.disabled = false;
+      if (showToast) toast(msg);
+    }
+  }
+  beszelTestBtn.addEventListener('click', () => checkBeszel(true));
+
+  // Kaydet: Beszel credentials'ı kullanıcının settings'ine yaz (debounce).
+  // Password boşsa mevcut değeri koru — server tarafında merged gibi davranır.
+  let beszelSaveTimer = null;
+  function scheduleBeszelSave() {
+    clearTimeout(beszelSaveTimer);
+    beszelSaveTimer = setTimeout(() => {
+      const url = beszelUrl.value.trim();
+      if (!url) return; // boş URL = silme isteği gerektirmez; env fallback kalır
+      const patch = { beszel: { url, user: beszelUser.value.trim(), password: beszelPassword.value } };
+      S.set({ beszel: { ...((S.get().beszel) || {}), ...patch.beszel } });
+      toast('Beszel credentials saved');
+    }, 900);
+  }
+  ['input', 'change'].forEach(ev =>
+    [beszelUrl, beszelUser, beszelPassword].forEach(el => el.addEventListener(ev, scheduleBeszelSave))
+  );
+
+  /* ============================================================
+     Two-factor authentication (TOTP — optional)
+     ============================================================ */
+  const twofaEls = {
+    status:  document.getElementById('twofa-status'),
+    enable:  document.getElementById('twofa-enable'),
+    disable: document.getElementById('twofa-disable'),
+    setup:   document.getElementById('twofa-setup'),
+    off:     document.getElementById('twofa-off'),
+    on:      document.getElementById('twofa-on'),
+    qr:      document.getElementById('twofa-qr'),
+    secret:  document.getElementById('twofa-secret'),
+    code:    document.getElementById('twofa-code'),
+    confirm: document.getElementById('twofa-confirm'),
+    start:   document.getElementById('twofa-start'),
+  };
+  let twofaConfigured = false;   // server'dan gelen enabled durumu
+  let twofaPendingSecret = null; // setup akışında üretilen secret
+
+  async function loadTwofaStatus() {
+    try {
+      const r = await fetch('/api/settings', { headers: { 'Accept': 'application/json' }, cache: 'no-store' });
+      if (!r.ok) return;
+      const d = await r.json();
+      const t = (d.settings && d.settings.twofa) || {};
+      twofaConfigured = !!t.enabled;
+      renderTwofa();
+    } catch {}
+  }
+
+  function renderTwofa() {
+    twofaEls.setup.classList.add('hidden');
+    if (twofaConfigured) {
+      twofaEls.status.textContent = 'Enabled — a code is required at every sign-in.';
+      twofaEls.status.classList.remove('text-[color:var(--green)]');
+      twofaEls.enable.classList.add('hidden');
+      twofaEls.disable.classList.remove('hidden');
+      twofaEls.off.classList.add('hidden');
+      twofaEls.on.classList.remove('hidden');
+    } else {
+      twofaEls.status.textContent = 'Not enabled — optional.';
+      twofaEls.enable.classList.remove('hidden');
+      twofaEls.disable.classList.add('hidden');
+      twofaEls.off.classList.remove('hidden');
+      twofaEls.on.classList.add('hidden');
+    }
+  }
+
+  twofaEls.enable.addEventListener('click', async () => {
+    twofaEls.enable.disabled = true;
+    twofaEls.status.textContent = 'Generating secret…';
+    try {
+      const r = await fetch('/api/2fa/setup', { cache: 'no-store' });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'setup failed');
+      twofaPendingSecret = d.secret;
+      twofaEls.secret.textContent = d.secret;
+      twofaEls.qr.innerHTML = '';
+      if (typeof QRCode !== 'undefined') {
+        new QRCode(twofaEls.qr, { text: d.uri, width: 168, height: 168, correctLevel: QRCode.CorrectLevel.M });
+      } else {
+        twofaEls.qr.textContent = d.uri;
+      }
+      twofaEls.code.value = '';
+      twofaEls.setup.classList.remove('hidden');
+      twofaEls.status.textContent = 'Scan the QR code, then confirm with a 6-digit code.';
+    } catch (err) {
+      twofaEls.status.textContent = 'Error: ' + err.message;
+    } finally {
+      twofaEls.enable.disabled = false;
+    }
+  });
+
+  twofaEls.start.addEventListener('click', () => twofaEls.enable.click());
+
+  twofaEls.confirm.addEventListener('click', async () => {
+    const code = twofaEls.code.value.trim();
+    if (!twofaPendingSecret || code.length !== 6) {
+      twofaEls.status.textContent = 'Enter the 6-digit code from your authenticator.';
+      return;
+    }
+    twofaEls.confirm.disabled = true;
+    try {
+      const r = await fetch('/api/2fa/enable', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ secret: twofaPendingSecret, code }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'enable failed');
+      twofaConfigured = true;
+      twofaPendingSecret = null;
+      twofaEls.code.value = '';
+      renderTwofa();
+      twofaEls.status.textContent = '2FA enabled successfully.';
+      if (typeof toast === 'function') toast('Two-factor authentication enabled');
+    } catch (err) {
+      twofaEls.status.textContent = 'Error: ' + err.message;
+    } finally {
+      twofaEls.confirm.disabled = false;
+    }
+  });
+
+  twofaEls.disable.addEventListener('click', async () => {
+    const code = window.prompt('Enter your current authenticator code to disable 2FA:');
+    if (!code) return;
+    twofaEls.disable.disabled = true;
+    try {
+      const r = await fetch('/api/2fa/disable', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: code.trim() }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'disable failed');
+      twofaConfigured = false;
+      renderTwofa();
+      twofaEls.status.textContent = '2FA disabled.';
+      if (typeof toast === 'function') toast('Two-factor authentication disabled');
+    } catch (err) {
+      twofaEls.status.textContent = 'Error: ' + err.message;
+    } finally {
+      twofaEls.disable.disabled = false;
+    }
+  });
+
+  loadTwofaStatus();
+
+  /* ============================================================
+     Services editor (server-persisted via /api/services)
+     ============================================================ */
+  const svcListEl = document.getElementById('svc-list');
+  const addBtn    = document.getElementById('add-svc');
+  const addForm   = document.getElementById('add-form');
+  const newName   = document.getElementById('new-name');
+  const newUrl    = document.getElementById('new-url');
+  const newDesc   = document.getElementById('new-desc');
+  const newCat    = document.getElementById('new-cat');
+  const newSave   = document.getElementById('new-save');
+
+  const API_SERVICES = '/api/services';
+  let svcs = [];
+
+  async function apiJson(method, url, body) {
+    const opts = { method, cache: 'no-store' };
+    if (body !== undefined) {
+      opts.headers = { 'Content-Type': 'application/json' };
+      opts.body = JSON.stringify(body);
+    }
+    const r = await fetch(url, opts);
+    if (!r.ok) {
+      let msg = 'request failed (' + r.status + ')';
+      try { msg = (await r.json()).error || msg; } catch {}
+      throw new Error(msg);
+    }
+    return r.json();
+  }
+
+  async function loadServices() {
+    try {
+      svcs = (await apiJson('GET', API_SERVICES)).services || [];
+    } catch {
+      svcs = [];
+    }
+    renderServices();
+  }
+
+  function renderServices() {
+    if (svcs.length === 0) {
+      svcListEl.innerHTML = '<p class="text-xs text-[color:var(--fg-muted)] py-3">No links yet. Click “+ Add link”.</p>';
+      return;
+    }
+    svcListEl.innerHTML = '';
+    svcs.forEach((s, i) => {
+      const auto = s.categoryOverride || window.autoCategorize(s.name, s.url, s.desc).category;
+      const row = document.createElement('div');
+      row.className = 'svc-row';
+      row.innerHTML =
+        '<input class="field focus-ring svc-name" data-i="' + i + '" value="' + esc(s.name) + '" placeholder="Name" />'
+        + '<input class="field focus-ring svc-url"  data-i="' + i + '" value="' + esc(s.url) + '" placeholder="URL" />'
+        + '<input class="field focus-ring svc-desc" data-i="' + i + '" value="' + esc(s.desc || '') + '" placeholder="Description" />'
+        + '<span class="hide-sm text-xs text-[color:var(--fg-muted)]">→ <span class="pill">' + esc(auto) + '</span></span>'
+        + '<button class="btn btn-danger focus-ring text-xs svc-del" data-i="' + i + '" aria-label="Delete ' + esc(s.name) + '">✕</button>';
+      svcListEl.appendChild(row);
+
+      const cats = Object.keys(window.KEYWORD_RULES || {}).concat(['Other']);
+      const sel = document.createElement('select');
+      sel.className = 'field focus-ring svc-cat';
+      sel.dataset.i = i;
+      const opts = ['auto'].concat(cats);
+      sel.innerHTML = opts.map(c =>
+        '<option value="' + esc(c) + '"' + (s.categoryOverride === c ? ' selected' : '') + '>' + esc(c) + '</option>'
+      ).join('');
+      row.insertBefore(sel, row.querySelector('.hide-sm'));
+      sel.addEventListener('change', async e => {
+        const i2 = +e.target.dataset.i;
+        const s2 = svcs[i2];
+        if (!s2) return;
+        const cat = e.target.value === 'auto' ? null : e.target.value;
+        try {
+          svcs = (await apiJson('PUT', API_SERVICES + '/' + encodeURIComponent(s2.id), {
+            name: s2.name, url: s2.url, desc: s2.desc || '', icon: s2.icon || 'box',
+            ping: s2.ping !== false, categoryOverride: cat,
+          })).services || svcs;
+          toast('Category saved');
+        } catch (err) { toast('Save failed: ' + err.message); }
+        renderServices();
+      });
+    });
+
+    svcListEl.querySelectorAll('.svc-name').forEach(el => el.addEventListener('change', onEdit));
+    svcListEl.querySelectorAll('.svc-url').forEach(el => {
+      el.addEventListener('change', onEdit);
+      el.addEventListener('input', e => {
+        const i = +e.target.dataset.i;
+        const sv = svcs[i];
+        if (!sv) return;
+        const autoCat = window.autoCategorize(sv.name, e.target.value, sv.desc).category;
+        const pill = e.target.closest('.svc-row').querySelector('.pill');
+        if (pill) pill.textContent = autoCat;
+      });
+    });
+    svcListEl.querySelectorAll('.svc-desc').forEach(el => el.addEventListener('change', onEdit));
+    svcListEl.querySelectorAll('.svc-del').forEach(el => el.addEventListener('click', onDelete));
+  }
+
+  async function onEdit(e) {
+    const i = +e.target.dataset.i;
+    const field = e.target.classList.contains('svc-name') ? 'name'
+      : e.target.classList.contains('svc-url') ? 'url' : 'desc';
+    const s = svcs[i];
+    if (!s) return;
+    s[field] = e.target.value.trim();
+    try {
+      svcs = (await apiJson('PUT', API_SERVICES + '/' + encodeURIComponent(s.id), {
+        name: s.name, url: s.url, desc: s.desc || '', icon: s.icon || 'box',
+        ping: s.ping !== false, categoryOverride: s.categoryOverride || null,
+      })).services || svcs;
+      toast('Saved');
+    } catch (err) {
+      toast('Save failed: ' + err.message);
+    }
+    if (field !== 'desc') renderServices();
+  }
+
+  async function onDelete(e) {
+    const i = +e.currentTarget.dataset.i;
+    const s = svcs[i];
+    if (!s) return;
+    if (!confirm('Delete "' + s.name + '"?')) return;
+    try {
+      svcs = (await apiJson('DELETE', API_SERVICES + '/' + encodeURIComponent(s.id))).services || svcs;
+      renderServices();
+      toast('Link removed');
+    } catch (err) {
+      toast('Delete failed: ' + err.message);
+    }
+  }
+
+  addBtn.addEventListener('click', () => {
+    const open = !addForm.classList.contains('hidden');
+    addForm.classList.toggle('hidden');
+    addBtn.textContent = open ? '+ Add link' : 'Cancel';
+    if (!open) newName.focus();
+  });
+  [newName, newUrl, newDesc].forEach(el => el.addEventListener('input', () => {
+    newCat.textContent = window.autoCategorize(newName.value, newUrl.value, newDesc.value).category;
+  }));
+  const newScheme = document.getElementById('new-scheme');
+  newUrl.addEventListener('input', () => {
+    const m = /^https?:\/\//.exec(newUrl.value);
+    if (m) {
+      newScheme.value = m[0];
+      newUrl.value = newUrl.value.slice(m[0].length);
+    }
+  });
+  async function addNew() {
+    const name = newName.value.trim();
+    const url  = (newScheme.value + newUrl.value.trim()).trim();
+    if (!name || !url) { toast('Name and URL required'); return; }
+    const desc = newDesc.value.trim();
+    const cat = window.autoCategorize(name, url, desc).category;
+    try {
+      svcs = (await apiJson('POST', API_SERVICES, {
+        name, url, desc, icon: 'box', ping: true, categoryOverride: cat,
+      })).services || svcs;
+      newName.value = ''; newUrl.value = ''; newDesc.value = ''; newCat.textContent = 'auto';
+      renderServices();
+      toast('Link added to ' + cat);
+    } catch (err) {
+      toast('Add failed: ' + err.message);
+    }
+  }
+  newSave.addEventListener('click', addNew);
+  addForm.addEventListener('submit', e => { e.preventDefault(); addNew(); });
+
+  loadServices();
+
+  /* ============================================================
+     Bookmarks editor (server-persisted via /api/bookmarks)
+     ============================================================ */
+  const bmListEl   = document.getElementById('bm-list');
+  const bmAddBtn   = document.getElementById('add-bm');
+  const bmAddForm  = document.getElementById('bm-add-form');
+  const bmNewName  = document.getElementById('bm-new-name');
+  const bmNewUrl   = document.getElementById('bm-new-url');
+  const bmNewColor = document.getElementById('bm-new-color');
+  const bmSave     = document.getElementById('bm-save');
+
+  const API_BOOKMARKS = '/api/bookmarks';
+  let bookmarks = [];
+
+  async function loadBookmarks() {
+    try {
+      bookmarks = (await apiJson('GET', API_BOOKMARKS)).bookmarks || [];
+    } catch {
+      bookmarks = [];
+    }
+    renderBookmarks();
+  }
+
+  function renderBookmarks() {
+    if (bookmarks.length === 0) {
+      bmListEl.innerHTML = '<p class="text-xs text-[color:var(--fg-muted)] py-3">No bookmarks yet. Click “+ Add bookmark”.</p>';
+      return;
+    }
+    bmListEl.innerHTML = '';
+    bookmarks.forEach((b, i) => {
+      const row = document.createElement('div');
+      row.className = 'svc-row';
+      row.innerHTML =
+        '<input class="field focus-ring bm-name" data-i="' + i + '" value="' + esc(b.name) + '" placeholder="Name" />'
+        + '<input class="field focus-ring bm-url"  data-i="' + i + '" value="' + esc(b.url) + '" placeholder="URL" />'
+        + '<input class="svc-color" type="color" data-i="' + i + '" value="' + esc(b.color || '#5E6AD2') + '" title="Dot color" />'
+        + '<button class="btn btn-danger focus-ring text-xs bm-del" data-i="' + i + '" aria-label="Delete ' + esc(b.name) + '">✕</button>';
+      const colorInput = row.querySelector('.svc-color');
+      colorInput.addEventListener('change', async e => {
+        const i2 = +e.target.dataset.i;
+        const b2 = bookmarks[i2];
+        if (!b2) return;
+        try {
+          bookmarks = (await apiJson('PUT', API_BOOKMARKS + '/' + encodeURIComponent(b2.id), {
+            name: b2.name, url: b2.url, color: e.target.value,
+          })).bookmarks || bookmarks;
+          toast('Color saved');
+        } catch (err) { toast('Save failed: ' + err.message); }
+        renderBookmarks();
+      });
+      bmListEl.appendChild(row);
+    });
+
+    bmListEl.querySelectorAll('.bm-name').forEach(el => el.addEventListener('change', onEditBm));
+    bmListEl.querySelectorAll('.bm-url').forEach(el => el.addEventListener('change', onEditBm));
+    bmListEl.querySelectorAll('.bm-del').forEach(el => el.addEventListener('click', onDeleteBm));
+  }
+
+  async function onEditBm(e) {
+    const i = +e.target.dataset.i;
+    const field = e.target.classList.contains('bm-name') ? 'name' : 'url';
+    const b = bookmarks[i];
+    if (!b) return;
+    b[field] = e.target.value.trim();
+    try {
+      bookmarks = (await apiJson('PUT', API_BOOKMARKS + '/' + encodeURIComponent(b.id), {
+        name: b.name, url: b.url, icon: b.icon || 'link', color: b.color || '',
+      })).bookmarks || bookmarks;
+      toast('Saved');
+    } catch (err) {
+      toast('Save failed: ' + err.message);
+    }
+    renderBookmarks();
+  }
+
+  async function onDeleteBm(e) {
+    const i = +e.currentTarget.dataset.i;
+    const b = bookmarks[i];
+    if (!b) return;
+    if (!confirm('Delete "' + b.name + '"?')) return;
+    try {
+      bookmarks = (await apiJson('DELETE', API_BOOKMARKS + '/' + encodeURIComponent(b.id))).bookmarks || bookmarks;
+      renderBookmarks();
+      toast('Bookmark removed');
+    } catch (err) {
+      toast('Delete failed: ' + err.message);
+    }
+  }
+
+  bmAddBtn.addEventListener('click', () => {
+    const open = !bmAddForm.classList.contains('hidden');
+    bmAddForm.classList.toggle('hidden');
+    bmAddBtn.textContent = open ? '+ Add bookmark' : 'Cancel';
+    if (!open) bmNewName.focus();
+  });
+
+  async function addBookmark() {
+    const name = bmNewName.value.trim();
+    const url  = bmNewUrl.value.trim();
+    if (!name || !url) { toast('Name and URL required'); return; }
+    if (!/^https?:\/\//i.test(url)) { toast('URL must start with http:// or https://'); return; }
+    try {
+      bookmarks = (await apiJson('POST', API_BOOKMARKS, {
+        name, url, icon: 'link', color: bmNewColor.value,
+      })).bookmarks || bookmarks;
+      bmNewName.value = ''; bmNewUrl.value = ''; bmNewColor.value = '#5E6AD2';
+      renderBookmarks();
+      toast('Bookmark added');
+    } catch (err) {
+      toast('Add failed: ' + err.message);
+    }
+  }
+  bmSave.addEventListener('click', addBookmark);
+  bmAddForm.addEventListener('submit', e => { e.preventDefault(); addBookmark(); });
+
+  loadBookmarks();
+
+  /* ============================================================
+     Backup (export/import)
+     ============================================================ */
+  const exportBtn = document.getElementById('export-btn');
+  const importInput = document.getElementById('import-input');
+
+  exportBtn.addEventListener('click', async () => {
+    try {
+      const [servicesData, bookmarksData] = await Promise.all([
+        apiJson('GET', API_SERVICES),
+        apiJson('GET', API_BOOKMARKS),
+      ]);
+      const payload = {
+        settings: window.HubSettings.get(),
+        services: servicesData.services || [],
+        bookmarks: bookmarksData.bookmarks || [],
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'server-hub-backup.json';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      toast('Backup exported');
+    } catch (err) {
+      toast('Export failed: ' + err.message);
+    }
+  });
+
+  importInput.addEventListener('change', async () => {
+    const file = importInput.files && importInput.files[0];
+    if (!file) return;
+    const insertedSvc = [];
+    const insertedBm  = [];
+    let deleting = false;
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text, (k, v) => {
+        if (k === '__proto__' || k === 'constructor' || k === 'prototype') return undefined;
+        return v;
+      });
+      if (!data || typeof data !== 'object' || !data.settings) throw new Error('invalid backup');
+      if (!confirm('Replace all current settings, links, and bookmarks with this backup?')) return;
+      window.HubSettings.set(data.settings);
+      // restore services/bookmarks: capture the CURRENT ids first, then insert
+      // the backup. Only after every insert succeeds do we delete the old
+      // items, so a mid-import failure never leaves the user's live links gone.
+      const oldSvcIds = new Set(((await apiJson('GET', API_SERVICES)).services || []).map(s => s.id));
+      const oldBmIds  = new Set(((await apiJson('GET', API_BOOKMARKS)).bookmarks || []).map(b => b.id));
+      const backupSvcs = Array.isArray(data.services) ? data.services : [];
+      const backupBms  = Array.isArray(data.bookmarks) ? data.bookmarks : [];
+      for (const s of backupSvcs) insertedSvc.push(await apiJson('POST', API_SERVICES, s));
+      for (const b of backupBms) insertedBm.push(await apiJson('POST', API_BOOKMARKS, b));
+      deleting = true;
+      // Delete only items that existed before the import (the POSTs assign new
+      // ids, so we must not touch the freshly inserted rows).
+      for (const id of oldSvcIds) await apiJson('DELETE', API_SERVICES + '/' + encodeURIComponent(id));
+      for (const id of oldBmIds) await apiJson('DELETE', API_BOOKMARKS + '/' + encodeURIComponent(id));
+      toast('Backup restored');
+    } catch (err) {
+      const msg = err.message;
+      if (deleting) {
+        // inserts are safely in place; a delete failed, so originals may remain — keep inserts, warn
+        toast('Restore warning: ' + msg + ' — new links kept, some old links may remain (duplicates)');
+      } else if (insertedSvc.length || insertedBm.length) {
+        // an insert failed; remove the ones already inserted (best-effort), keep originals
+        try {
+          for (const s of insertedSvc) await apiJson('DELETE', API_SERVICES + '/' + encodeURIComponent(s.id));
+          for (const b of insertedBm) await apiJson('DELETE', API_BOOKMARKS + '/' + encodeURIComponent(b.id));
+          toast('Import failed: ' + msg + ' — originals kept, partial imports rolled back');
+        } catch (rollbackErr) {
+          toast('Import failed: ' + msg + ' (partial cleanup failed: ' + rollbackErr.message + ')');
+        }
+      } else {
+        toast('Import failed: ' + msg);
+      }
+    } finally {
+      importInput.value = '';
+    }
+  });
+
+  /* ============================================================
+     Reset
+     ============================================================ */
+  document.getElementById('reset').addEventListener('click', () => {
+    if (!confirm('Reset ALL settings?')) return;
+    try { localStorage.removeItem(S.KEY); } catch {}
+    location.reload();
+  });
+
+  /* ============================================================
+     Toast
+     ============================================================ */
+  const toastEl = document.getElementById('toast');
+  let toastT;
+  function toast(msg) {
+    toastEl.textContent = msg;
+    toastEl.classList.add('show');
+    clearTimeout(toastT);
+    toastT = setTimeout(() => toastEl.classList.remove('show'), 1600);
+  }
+
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+</script>
+</body>
+</html>

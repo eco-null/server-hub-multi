@@ -1,0 +1,815 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tests — Server Hub</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="settings.js"></script>
+  <script src="categorize.js"></script>
+  <style>
+    body { font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace; padding: 24px; max-width: 900px; margin: 0 auto; background: #0b0c10; color: #d8dee9; }
+    h1 { font-size: 1.4rem; margin-bottom: 8px; }
+    .summary { margin: 12px 0 20px; font-size: 0.95rem; }
+    .results { list-style: none; padding: 0; margin: 0; }
+    li { padding: 8px 12px; border-left: 3px solid; margin-bottom: 6px; border-radius: 4px; background: #14151b; font-size: 0.85rem; }
+    .pass { border-color: #22C55E; color: #86efac; }
+    .fail { border-color: #EF4444; color: #fca5a5; }
+    .skip { border-color: #64748b; color: #94a3b8; }
+    .grp  { margin-top: 18px; font-weight: 600; color: #818cf8; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; }
+    pre { white-space: pre-wrap; }
+    a { color: #818cf8; }
+    button { margin: 4px 0; padding: 6px 14px; background: #5E6AD2; color: white; border: 0; border-radius: 6px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h1>Server Hub — test suite</h1>
+  <p class="summary" id="summary">Running…</p>
+  <a href="index.html">← back to dashboard</a>
+  <ul class="results" id="results"></ul>
+
+<script>
+  let passed = 0, failed = 0, skipped = 0;
+  const results = document.getElementById('results');
+  const summary = document.getElementById('summary');
+
+  function out(name, ok, detail) {
+    const li = document.createElement('li');
+    li.className = ok ? 'pass' : 'fail';
+    li.textContent = (ok ? '✓ ' : '✗ ') + name + (detail ? ' — ' + detail : '');
+    results.appendChild(li);
+    if (ok) passed++; else failed++;
+  }
+  function skip(name, why) {
+    const li = document.createElement('li');
+    li.className = 'skip';
+    li.textContent = '↦ ' + name + (why ? ' (skipped: ' + why + ')' : '');
+    results.appendChild(li);
+    skipped++;
+  }
+  function group(name) {
+    const h = document.createElement('div');
+    h.className = 'grp'; h.textContent = name;
+    results.appendChild(h);
+  }
+  function eq(a, b, name) {
+    const ok = JSON.stringify(a) === JSON.stringify(b);
+    out(name, ok, ok ? '' : 'got ' + JSON.stringify(a) + ' ≠ expected ' + JSON.stringify(b));
+  }
+  function ok(cond, name, detail) { out(name, !!cond, detail || ''); }
+
+  /* ============================================================
+     1. categorize.js — auto-categorization heuristic
+     ============================================================ */
+  group('categorize.js — autoCategorize');
+  const C = window.autoCategorize;
+  ok(typeof C === 'function', 'autoCategorize is a function');
+
+  const CASES = [
+    // name, url, desc, expected-category
+    ['Grafana',         'https://grafana.example.com',  'Metrics & dashboards',  'Monitoring'],
+    ['Uptime Kuma',     'https://status.example.com',   'Uptime tracker',        'Monitoring'],
+    ['Prometheus',      'https://prometheus.local',     'Time-series store',     'Monitoring'],
+    ['Vaultwarden',     'https://vault.example.com',    'Password manager',      'Security'],
+    ['Authelia',        'https://auth.example.com',     'SSO gateway',           'Security'],
+    ['tor-proxy',       'http://tor-proxy.local:9050',  'Onion relay',           'Security'],
+    ['Pi-hole',         'https://pihole.example.com',   'Ad blocking',           'Network'],
+    ['WireGuard',       'https://vpn.example.com',      'VPN portal',            'Network'],
+    ['AdGuard Home',    'https://dns.example.com',      'DNS filter',            'Network'],
+    ['Nextcloud',       'https://cloud.example.com',   'Files & calendar',      'Productivity'],
+    ['Joplin Server',   'https://notes.example.com',   'Notes sync',            'Productivity'],
+    ['Paperless-ngx',   'https://docs.example.com',    'OCR archive',           'Productivity'],
+    ['Jellyfin',        'https://media.example.com',   'Movies & music',        'Media'],
+    ['Navidrome',       'https://music.example.com',   'Music server',          'Media'],
+    ['Audiobookshelf',  'https://books.example.com',   'Audiobooks',            'Media'],
+    ['immich',          'https://photos.example.com',   'Photo library',        'Media'],
+    ['Gitea',           'https://git.example.com',      'Git host',              'Dev'],
+    ['Woodpecker CI',   'https://ci.example.com',       'CI',                    'Dev'],
+    ['code-server',     'https://code.example.com',     'Browser VS Code',      'Dev'],
+    ['Home Assistant',  'https://home.example.com',    'Smart home',            'Home'],
+    ['Mosquitto',       'http://mqtt.local:9001',       'MQTT broker',          'Home'],
+    ['Ollama',          'https://llm.example.com',      'Local LLM server',     'AI'],
+    ['Open WebUI',      'https://chat.example.com',     'Chat UI for LLMs',     'AI'],
+    ['SearXNG',         'https://search.example.com',  'Meta search',           'Search'],
+    ['pgAdmin',         'https://pgadmin.example.com',  'Postgres admin',       'Database'],
+    ['Mattermost',      'https://chat.example.com/mm',  'Team chat',             'Communication'],
+    ['Steam',           'https://steam.example.com',     'Game store',            'Gaming'],
+    ['Calibre',         'https://books.example.com/cb',  'Ebook library',        'Books'],
+    ['Ghostfolio',      'https://fin.example.com',       'Portfolio tracking',   'Money'],
+    ['Traccar',         'https://gps.example.com',       'GPS tracking',         'Travel'],
+    ['Mealie',          'https://recipes.example.com',   'Recipe manager',       'Health'],
+    ['coolify',         'https://deploy.example.com',    'Self-host PaaS',       'Dev'],
+    ['netdata',         'https://metrics.example.com',   'System metrics',       'Monitoring'],
+  ];
+  for (const [n, u, d, exp] of CASES) {
+    const got = C(n, u, d).category;
+    eq(got, exp, 'categorize "' + n + '" → ' + exp);
+  }
+
+  // Fallback to Other
+  eq(C('Mystery App', 'https://mystery.local', 'does something weird').category, 'Other', 'unknown app → Other');
+  ok(C('Mystery App', 'https://mystery.local', '').matched === null, 'Other has matched=null');
+
+  // Match by URL host alone
+  eq(C('service', 'https://grafana.mydomain.com', '').category, 'Monitoring', 'match on host substring');
+  // Match by URL path
+  eq(C('relay', 'https://example.com/git', '').category, 'Dev', 'match on path');
+
+  // Specificity: 'pihole' hits Network even if desc mentions 'security'
+  eq(C('Pi-hole', 'https://pihole.local', 'DNS security filtering').category, 'Network', 'specificity overrides generic');
+
+  /* ============================================================
+     2. settings.js — storage layer
+     ============================================================ */
+  group('settings.js — HubSettings');
+
+  // Reset to clean state for deterministic tests
+  try { localStorage.removeItem(window.HubSettings.KEY); } catch {}
+  let s = window.HubSettings.get();
+  eq(s.theme, 'auto', 'default theme is auto');
+  eq(s.accent, '#5E6AD2', 'default accent');
+  eq(s.userName, '', 'default userName empty');
+  eq(s.features.statusPings, true, 'default feature flag true');
+  ok(Array.isArray(s.services) && s.services.length === 0, 'default services array empty');
+  eq(window.HubSettings.defaults.search.provider, 'google', 'default search provider is google');
+  eq(window.HubSettings.defaults.search.searxngUrl, '', 'default searxngUrl empty');
+
+  // set + persist
+  window.HubSettings.set({ theme: 'dark', accent: '#22C55E', userName: 'Tester' });
+  s = window.HubSettings.get();
+  eq(s.theme, 'dark',   'set theme persisted');
+  eq(s.accent, '#22C55E', 'set accent persisted');
+  eq(s.userName, 'Tester', 'set userName persisted');
+
+  // partial merge preserves other keys
+  window.HubSettings.set({ userName: 'Changed' });
+  s = window.HubSettings.get();
+  eq(s.userName, 'Changed', 'partial update to userName');
+  eq(s.theme, 'dark', 'theme preserved across partial update');
+  eq(s.accent, '#22C55E', 'accent preserved across partial update');
+
+  // nested feature merge
+  window.HubSettings.set({ features: { statusPings: false } });
+  s = window.HubSettings.get();
+  eq(s.features.statusPings, false, 'nested feature flag updated');
+  eq(s.features.clock, true, 'sibling feature preserved under nested merge');
+
+  // services round-trip
+  window.HubSettings.set({ services: [{ name: 'X', url: 'https://x.local', desc: 'd' }] });
+  s = window.HubSettings.get();
+  ok(s.services.length === 1 && s.services[0].url === 'https://x.local', 'services round-trip');
+
+  // subscribe fires on set
+  let fired = 0;
+  const unsub = window.HubSettings.subscribe(() => fired++);
+  window.HubSettings.set({ userName: 'Subbed' });
+  ok(fired === 1, 'subscribe fired once on set');
+  unsub();
+  window.HubSettings.set({ userName: 'unsubscribed' });
+  ok(fired === 1, 'unsubscribe stops further fires');
+
+  // hexToRgba helper
+  const rgba = window.HubSettings.hexToRgba('#5E6AD2', 0.2);
+  eq(rgba, 'rgba(94,106,210,0.2)', 'hexToRgba roundtrip');
+  ok(window.HubSettings.hexToRgba('#abc', 0.5).startsWith('rgba('), 'hexToRgba handles 3-digit hex');
+  ok(window.HubSettings.hexToRgba('garbage', 0.5).startsWith('rgba(94,106,210'), 'hexToRgba falls back on invalid');
+
+  // isDark
+  ok(window.HubSettings.isDark({ theme: 'dark' }) === true, 'isDark true for dark');
+  ok(window.HubSettings.isDark({ theme: 'light' }) === false, 'isDark false for light');
+
+  // wallpaper — model + applyWallpaper (sync paths only; custom-image path needs real canvas)
+  eq(window.HubSettings.defaults.wallpaper.mode, 'none', 'default wallpaper mode is none');
+  eq(window.HubSettings.defaults.wallpaper.gradient, 'aurora', 'default wallpaper gradient is aurora');
+  eq(window.HubSettings.defaults.wallpaper.url, '', 'default wallpaper url empty');
+  ok(window.HubSettings.GRADIENTS && typeof window.HubSettings.GRADIENTS.aurora === 'string', 'GRADIENTS map exported');
+  ok(typeof window.HubSettings.applyWallpaper === 'function', 'applyWallpaper exported');
+
+  // gradient mode adds classes/background on the fixed wallpaper layer
+  window.HubSettings.applyWallpaper({ wallpaper: { mode: 'gradient', gradient: 'aurora' } });
+  ok(document.body.classList.contains('wallpaper'), 'gradient mode adds wallpaper class to body');
+  ok(document.body.classList.contains('wp-active'), 'gradient mode activates the wallpaper layer');
+  ok(document.body.style.getPropertyValue('--wp-image'), 'gradient mode sets --wp-image on body');
+  ok(document.documentElement.classList.contains('wallpaper-dark'), 'gradient mode adds wallpaper-dark to <html>');
+  ok(!document.documentElement.classList.contains('wallpaper-light'), 'gradient mode does not add wallpaper-light');
+
+  // none mode strips prior state
+  window.HubSettings.applyWallpaper({ wallpaper: { mode: 'none' } });
+  ok(!document.body.classList.contains('wallpaper'), 'none mode removes wallpaper class from body');
+  ok(!document.body.classList.contains('wp-active'), 'none mode deactivates the wallpaper layer');
+  ok(!document.body.style.getPropertyValue('--wp-image'), 'none mode clears --wp-image');
+  ok(!document.documentElement.classList.contains('wallpaper-dark'), 'none mode removes wallpaper-dark from <html>');
+  ok(!document.documentElement.classList.contains('wallpaper-light'), 'none mode removes wallpaper-light from <html>');
+
+  // cleanup
+  try { localStorage.removeItem(window.HubSettings.KEY); } catch {}
+
+  /* ============================================================
+     3. index.html — DOM behaviour (loaded in iframe)
+     ============================================================ */
+  group('index.html — DOM integration (iframe)');
+
+  const iframe = document.createElement('iframe');
+  iframe.src = 'index.html';
+  iframe.style.cssText = 'position:fixed; bottom:0; right:0; width:480px; height:600px; opacity:0.6; border:1px solid #444; z-index:50;';
+  iframe.id = 'hub';
+  document.body.appendChild(iframe);
+
+  group('settings.html — search provider UI (iframe)');
+
+  const sframe = document.createElement('iframe');
+  sframe.src = 'settings.html';
+  sframe.style.cssText = 'position:fixed; bottom:0; left:0; width:480px; height:600px; opacity:0.6; border:1px solid #444; z-index:49;';
+  sframe.id = 'hub-settings';
+  document.body.appendChild(sframe);
+
+  let hubWin, sWin, runDomTests, runSettingsDomTests;
+  let pending = 2;
+
+  iframe.addEventListener('load', () => {
+    hubWin = iframe.contentWindow;
+    runDomTests().catch(e => { out('index.html DOM tests ran', false, String(e)); }).then(maybeFinish);
+  });
+
+  sframe.addEventListener('load', () => {
+    sWin = sframe.contentWindow;
+    runSettingsDomTests().catch(e => { out('settings.html DOM tests ran', false, String(e)); }).then(maybeFinish);
+  });
+
+  function maybeFinish() { if (--pending <= 0) finish(); }
+
+  // Safety timeout in case an iframe never fires its load event
+  setTimeout(() => {
+    if (!hubWin) { skip('index.html DOM tests', 'iframe did not load (open via http/file)'); maybeFinish(); }
+    if (!sWin)   { skip('settings.html DOM tests', 'iframe did not load (open via http/file)'); maybeFinish(); }
+  }, 4000);
+
+  let finished = false;
+  function finish() {
+    if (finished) return; finished = true;
+    summary.textContent =
+      passed + ' passed · ' + failed + ' failed · ' + skipped + ' skipped '
+      + (failed === 0 ? '— ✅ ALL GREEN' : '— ❌ FAILURES');
+    summary.style.color = failed === 0 ? '#22C55E' : '#EF4444';
+    if (window.__testAuto) console.log('done');
+  }
+
+  runDomTests = async function () {
+    const w = hubWin;
+    ok(typeof w.__HUB__ === 'object', '__HUB__ exported on index.html window');
+    eq(w.__HUB__.SERVICES_DEFAULT, [], 'no bundled default services');
+
+    // Stub the API so DOM behaviour is deterministic
+    const CANNED = [
+      { id: 'svc-1', name: 'Grafana',    url: 'https://grafana.example.com', desc: 'Metrics & dashboards',       icon: 'chart', ping: true,  categoryOverride: null },
+      { id: 'svc-2', name: 'Uptime Kuma',url: 'https://status.example.com',  desc: 'Uptime & incident tracking', icon: 'pulse', ping: true,  categoryOverride: null },
+      { id: 'svc-3', name: 'Jellyfin',   url: 'https://media.example.com',   desc: 'Movies & music streaming',   icon: 'film',  ping: true,  categoryOverride: null },
+    ];
+    let apiLog = [];
+    function stubFetch(list) {
+      w.fetch = (url, opts = {}) => {
+        const method = opts.method || 'GET';
+        apiLog.push(method + ' ' + url);
+        const id = String(url).split('/').pop();
+        if (method === 'GET' && String(url).includes('/api/services')) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ services: list }) });
+        }
+        if (method === 'DELETE') {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ services: list.filter(s => s.id !== id) }) });
+        }
+        if (method === 'POST') {
+          const body = JSON.parse(opts.body);
+          const created = { id: 'svc-new', ...body, categoryOverride: body.categoryOverride || null };
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ services: [...list, created] }) });
+        }
+        if (method === 'PUT') {
+          const body = JSON.parse(opts.body);
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ services: list.map(s => s.id === id ? { ...s, ...body, id } : s) }) });
+        }
+        return Promise.resolve({ ok: false, json: () => Promise.resolve({ error: 'nope' }) });
+      };
+    }
+
+    // reloadServices fetches from the (stubbed) API
+    stubFetch(CANNED);
+    const fetched = await w.__HUB__.reloadServices();
+    ok(Array.isArray(fetched) && fetched.length === CANNED.length,
+       'reloadServices loads from /api/services', 'got ' + fetched.length);
+
+    // Render fixture; every card must carry hover edit/delete buttons
+    w.__HUB__.setServices(fetched);
+    w.__HUB__.renderGroups();
+    const cards = w.document.querySelectorAll('.card');
+    ok(cards.length === fetched.length, 'rendered cards count == services', cards.length + ' vs ' + fetched.length);
+    const withCat = w.document.querySelectorAll('.card[data-category]');
+    ok(withCat.length === cards.length, 'every card tagged with category');
+    ok(cards.length > 0 && cards[0].querySelector('.card-action[title="Edit"]'),
+       'every card has an edit button');
+    ok(cards.length > 0 && cards[0].querySelector('.card-action[title="Delete"]'),
+       'every card has a delete button');
+
+    // Adaptive group layout: wrapper + big/small category classes
+    const groupsCols = w.document.getElementById('groups-cols');
+    ok(groupsCols && groupsCols.className.includes('flex flex-wrap'), 'groups wrapper is flex-wrap', groupsCols && groupsCols.className);
+    const groups = w.document.querySelectorAll('#groups-cols .group');
+    const anyBig = Array.from(groups).some(g => g.className.includes('w-full') && g.querySelector('.grid').className.includes('sm:grid-cols-2'));
+    const anySmall = Array.from(groups).some(g => g.className.includes('flex-1 min-w-[240px]') && g.querySelector('.grid').className.includes('grid-cols-1 gap-3'));
+    ok(anyBig || anySmall, 'groups use adaptive big/small layout classes', Array.from(groups).map(g => g.className).join(' | '));
+
+    // Search filter still works
+    const input = w.__HUB__.getSearchInput();
+    input.value = 'grafana';
+    w.__HUB__.filter('grafana');
+    const visible = Array.from(w.document.querySelectorAll('.card')).filter(c => c.style.display !== 'none');
+    ok(visible.length === 1 && visible[0].dataset.name.includes('grafana'), 'search "grafana" narrows to 1', 'visible=' + visible.length);
+
+    // Clear filter
+    input.value = '';
+    w.__HUB__.filter('');
+    const allVisible = Array.from(w.document.querySelectorAll('.card')).filter(c => c.style.display !== 'none');
+    ok(allVisible.length === fetched.length, 'clearing filter restores all cards', allVisible.length);
+
+    // Task 3 — search input must not carry the focus-ring class
+    ok(!input.classList.contains('focus-ring'), 'search input does not use focus-ring class');
+
+    // Search popup — clicking #search opens the modal
+    const searchModal = w.document.getElementById('search-modal');
+    ok(searchModal && searchModal.classList.contains('hidden'), 'search modal starts hidden');
+    w.document.getElementById('search').dispatchEvent(new w.MouseEvent('click'));
+    ok(!searchModal.classList.contains('hidden'), 'clicking #search opens the search popup');
+    ok(w.document.activeElement === w.document.getElementById('search-modal-input'), 'popup input focused on open');
+
+    // Typing filters suggestions to matching services
+    const sInput = w.document.getElementById('search-modal-input');
+    sInput.value = 'grafana';
+    sInput.dispatchEvent(new w.Event('input'));
+    let sugg = w.document.querySelectorAll('#search-suggestions button');
+    ok(sugg.length === 1 && sugg[0].textContent.includes('Grafana'), 'typing filters suggestions to matching service', 'got ' + sugg.length);
+
+    // Enter with a query calls webSearch → provider URL via window.open
+    let opened = [];
+    const prevOpen = w.open;
+    w.open = (url, target, features) => { opened.push({ url, target, features }); return null; };
+    sInput.value = 'homelab wiki';
+    sInput.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter' }));
+    ok(opened.length === 1, 'Enter triggers webSearch', 'opened=' + opened.length);
+    ok(opened[0] && opened[0].url === 'https://www.google.com/search?q=' + encodeURIComponent('homelab wiki'),
+       'webSearch opens provider URL', opened[0] && opened[0].url);
+    ok(searchModal.classList.contains('hidden'), 'popup closes after Enter search');
+
+    // Clicking a suggestion opens the service URL
+    w.document.getElementById('search').dispatchEvent(new w.MouseEvent('click'));
+    sInput.value = '';
+    sInput.dispatchEvent(new w.Event('input'));
+    sugg = w.document.querySelectorAll('#search-suggestions button');
+    opened = [];
+    sugg[0].click();
+    ok(opened.length === 1, 'clicking a suggestion opens a URL', 'opened=' + opened.length);
+    ok(opened[0] && opened[0].url === 'https://grafana.example.com', 'suggestion opens the service URL', opened[0] && opened[0].url);
+    ok(searchModal.classList.contains('hidden'), 'popup closes after suggestion click');
+    w.open = prevOpen;
+
+    // Keyboard navigation — ArrowDown/ArrowUp move a highlight across results,
+    // Enter opens the selected service (web search only when nothing selected).
+    w.document.getElementById('search').dispatchEvent(new w.MouseEvent('click'));
+    sInput.value = '';
+    sInput.dispatchEvent(new w.Event('input'));
+    opened = [];
+    const prevOpen2 = w.open;
+    w.open = (url, target, features) => { opened.push({ url, target, features }); return null; };
+    const rows = w.document.querySelectorAll('#search-suggestions button');
+    ok(rows.length > 0, 'suggestions rendered for keyboard nav', rows.length + ' rows');
+    sInput.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowDown' }));
+    let sel = w.document.querySelector('#search-suggestions button[aria-selected="true"]');
+    ok(sel === rows[0], 'ArrowDown selects the first suggestion');
+    ok(sel && sel.classList.contains('suggestion-selected'), 'selected suggestion gets the .suggestion-selected class');
+    ok(rows[1] && !rows[1].classList.contains('suggestion-selected'), 'unselected rows do not get the highlight class');
+    const selCss = Array.from(w.document.styleSheets).flatMap(sh => {
+      try { return Array.from(sh.cssRules); } catch { return []; }
+    }).find(r => r.selectorText && r.selectorText.replace(/\s+/g, ' ').includes('.suggestion-selected'));
+    ok(selCss && /border/.test(selCss.style.cssText),
+       'selected suggestion has a visible border frame', selCss && selCss.style.cssText);
+    sInput.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowDown' }));
+    sel = w.document.querySelector('#search-suggestions button[aria-selected="true"]');
+    ok(sel === rows[1], 'ArrowDown moves to the second suggestion');
+    sInput.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowUp' }));
+    sel = w.document.querySelector('#search-suggestions button[aria-selected="true"]');
+    ok(sel === rows[0], 'ArrowUp moves back to the first suggestion');
+    sInput.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter' }));
+    ok(opened.length === 1, 'Enter opens the selected service', 'opened=' + opened.length);
+    ok(opened[0] && opened[0].url === 'https://grafana.example.com', 'Enter opens the highlighted service URL', opened[0] && opened[0].url);
+    ok(searchModal.classList.contains('hidden'), 'popup closes after Enter on a selection');
+
+    // Enter with a selection cleared resets to web search; no selection → web search
+    w.document.getElementById('search').dispatchEvent(new w.MouseEvent('click'));
+    sInput.value = 'grafana';
+    sInput.dispatchEvent(new w.Event('input'));
+    opened = [];
+    sInput.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowDown' }));
+    sInput.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter' }));
+    ok(opened.length === 1 && opened[0].url === 'https://grafana.example.com', 're-typing then selecting opens the service');
+    w.open = prevOpen2;
+    w.document.getElementById('search').dispatchEvent(new w.MouseEvent('click'));
+    sInput.value = 'homelab wiki';
+    sInput.dispatchEvent(new w.Event('input'));
+    opened = [];
+    w.open = (url, target, features) => { opened.push({ url, target, features }); return null; };
+    sInput.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter' }));
+    ok(opened.length === 1 && opened[0].url === 'https://www.google.com/search?q=' + encodeURIComponent('homelab wiki'),
+       'Enter without a selection still does a web search', opened[0] && opened[0].url);
+    w.open = prevOpen;
+
+    // Esc closes
+    w.document.getElementById('search').dispatchEvent(new w.MouseEvent('click'));
+    ok(!searchModal.classList.contains('hidden'), 'popup reopens for esc test');
+    sInput.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape' }));
+    ok(searchModal.classList.contains('hidden'), 'Esc closes the search popup');
+
+    // Theme still works
+    w.document.documentElement.classList.remove('light', 'dark');
+    w.HubSettings.set({ theme: 'light' });
+    w.__HUB__.applyTheme('light');
+    ok(w.document.documentElement.classList.contains('light'), 'applyTheme(light) adds html.light');
+    w.__HUB__.applyTheme('dark');
+    ok(w.document.documentElement.classList.contains('dark') && !w.document.documentElement.classList.contains('light'), 'applyTheme(dark) sets html.dark, removes light');
+
+    // Theme toggle sits stacked under the logo in a flex-col container
+    const logo = w.document.querySelector('img[alt="Server Hub"]');
+    const themeToggle = w.document.getElementById('theme-toggle');
+    ok(logo && themeToggle && logo.parentElement === themeToggle.parentElement,
+       'logo and theme toggle share the same parent');
+    ok(logo && themeToggle && logo.parentElement.classList.contains('flex-col'),
+       'logo/theme-toggle container is flex-col');
+
+    // Wallpaper — settings change re-applies on the dashboard (init + subscribe)
+    w.HubSettings.set({ wallpaper: { mode: 'gradient', gradient: 'ocean' } });
+    ok(w.document.body.classList.contains('wallpaper'), 'wallpaper setting adds wallpaper class to body');
+    ok(w.document.body.classList.contains('wp-active'), 'wallpaper setting activates the wallpaper layer');
+    ok(w.document.body.style.getPropertyValue('--wp-image') &&
+       w.document.body.style.getPropertyValue('--wp-image').trim() !== '',
+       'wallpaper gradient sets a non-empty --wp-image', String(w.document.body.style.getPropertyValue('--wp-image')).slice(0, 60));
+
+    // Custom URL wallpaper hides the animated gradient blobs; back to none restores them
+    const wBlobs = w.document.querySelector('[data-feature="blobs"]');
+    w.HubSettings.set({ wallpaper: { mode: 'custom', url: 'https://example.com/wall.jpg' } });
+    ok(wBlobs && wBlobs.style.display === 'none', 'custom wallpaper hides gradient blobs');
+    ok(w.document.body.classList.contains('wallpaper'), 'custom mode adds wallpaper class to body');
+    ok(w.document.body.style.getPropertyValue('--wp-image').includes('example.com'), 'custom mode sets --wp-image to the URL');
+    ok(w.document.getElementById('theme-toggle').disabled === true, 'custom wallpaper disables theme toggle');
+    w.HubSettings.set({ wallpaper: { mode: 'none' } });
+    ok(wBlobs && wBlobs.style.display !== 'none', 'none mode restores gradient blobs');
+    ok(w.document.getElementById('theme-toggle').disabled === false, 'none mode re-enables theme toggle');
+
+    // Wallpaper layer is a fixed, viewport-sized element (never re-scales/zooms)
+    const wpLayerRule = Array.from(w.document.styleSheets).flatMap(sh => {
+      try { return Array.from(sh.cssRules); } catch { return []; }
+    }).find(r => r.selectorText && r.selectorText.includes('#wallpaper'));
+    ok(wpLayerRule && /position\s*:\s*fixed/.test(wpLayerRule.style.cssText),
+       'wallpaper layer is position:fixed (viewport-locked, no zoom)', wpLayerRule && wpLayerRule.style.cssText);
+    ok(wpLayerRule && /z-index\s*:\s*-1/.test(wpLayerRule.style.cssText),
+       'wallpaper layer sits behind content (z-index:-1)', wpLayerRule && wpLayerRule.style.cssText);
+    ok(wpLayerRule && /background-size\s*:\s*cover/.test(wpLayerRule.style.cssText),
+       'wallpaper layer uses cover against the viewport', wpLayerRule && wpLayerRule.style.cssText);
+    ok(wpLayerRule && /transition\s*:\s*opacity/.test(wpLayerRule.style.cssText),
+       'wallpaper layer cross-fades smoothly', wpLayerRule && wpLayerRule.style.cssText);
+    ok(w.document.getElementById('wallpaper') !== null, 'wallpaper layer element exists in the DOM');
+    ok(w.document.getElementById('wallpaper').parentElement === w.document.body,
+       'wallpaper layer is a direct child of body');
+    const wpShowRule = Array.from(w.document.styleSheets).flatMap(sh => {
+      try { return Array.from(sh.cssRules); } catch { return []; }
+    }).find(r => r.selectorText && r.selectorText.replace(/\s+/g, ' ') === 'body.wallpaper');
+    ok(wpShowRule && /background-image\s*:\s*none/.test(wpShowRule.style.cssText),
+       'body background is cleared while wallpaper is active (layer shows through)', wpShowRule && wpShowRule.style.cssText);
+
+    // Blobs use pre-blurred radial gradients, not filter: blur() — the blur
+    // forces per-frame re-rasterization (scroll jank); gradient is the same
+    // look at ~zero cost.
+    function findCssRule(sel) {
+      return Array.from(w.document.styleSheets).flatMap(sh => {
+        try { return Array.from(sh.cssRules); } catch { return []; }
+      }).find(r => r.selectorText && r.selectorText.replace(/\s+/g, ' ') === sel);
+    }
+    const blobRule = findCssRule('.blob');
+    ok(blobRule && !/filter\s*:\s*blur/.test(blobRule.style.cssText),
+       'blobs avoid filter:blur (main scroll-lag source)', blobRule && blobRule.style.cssText);
+    ok(blobRule && /will-change\s*:\s*transform/.test(blobRule.style.cssText),
+       'blobs stay on a compositor layer', blobRule && blobRule.style.cssText);
+    const blobARule = findCssRule('.blob.a');
+    ok(blobARule && /radial-gradient/.test(blobARule.style.cssText),
+       'blob.a uses a pre-blurred radial-gradient', blobARule && blobARule.style.cssText);
+
+    // Scroll performance: off-screen category sections are skipped entirely by
+    // the renderer (content-visibility: auto) — the invisible, standard fix for
+    // long-page scroll jank (settings has no blobs, which is why it feels
+    // smoother; this makes the services grid skip work too).
+    const cvRule = Array.from(w.document.styleSheets).flatMap(sh => {
+      try { return Array.from(sh.cssRules); } catch { return []; }
+    }).find(r => r.selectorText && r.selectorText.includes('#groups .group'));
+    ok(cvRule && /content-visibility\s*:\s*auto/.test(cvRule.style.cssText),
+       'category sections use content-visibility:auto (skip off-screen paint)', cvRule && cvRule.style.cssText);
+    ok(cvRule && /contain-intrinsic-size/.test(cvRule.style.cssText),
+       'content-visibility sections have a stable intrinsic size (no scrollbar jump)', cvRule && cvRule.style.cssText);
+
+    // autoCategorize passthrough
+    eq(w.__HUB__.autoCategorize('Jellyfin', 'https://media.local', 'Movies').category, 'Media', '__HUB__.autoCategorize passthrough');
+
+    // Edit modal opens prefilled, icon grid renders, current icon selected
+    w.confirm = () => true; // no native dialogs in tests
+    w.__HUB__.edit('svc-1');
+    const modal = w.document.getElementById('edit-modal');
+    ok(modal && !modal.classList.contains('hidden'), 'edit button opens the modal');
+    eq(w.document.getElementById('edit-name').value, 'Grafana', 'modal prefills name');
+    eq(w.document.getElementById('edit-scheme').value, 'https://', 'modal prefill sets scheme select');
+    eq(w.document.getElementById('edit-url').value, 'grafana.example.com', 'modal prefills url without scheme');
+    const iconOpts = w.document.querySelectorAll('#edit-icons .icon-opt');
+    ok(iconOpts.length > 0, 'icon picker grid rendered');
+    ok(w.document.querySelector('#edit-icons .icon-opt.selected').dataset.icon === 'chart', 'current icon highlighted');
+    // New icons are present and selectable
+    const iconKeys = Array.from(iconOpts).map(b => b.dataset.icon);
+    ok(iconKeys.includes('server') && iconKeys.includes('camera') && iconKeys.includes('gamepad'),
+      'expanded icon set includes new icons', iconKeys.length + ' icons');
+    ok(iconKeys.includes('book') && iconKeys.includes('wallet') && iconKeys.includes('map-pin'),
+      'new icons cover books/money/travel categories');
+
+    // Save edit issues PUT and re-renders renamed card
+    apiLog = [];
+    stubFetch(CANNED);
+    let lastPutBody = null;
+    const prevFetch2 = w.fetch;
+    w.fetch = (url, opts = {}) => {
+      if ((opts.method || 'GET') === 'PUT' && String(url).includes('/api/services/')) {
+        lastPutBody = JSON.parse(opts.body);
+      }
+      return prevFetch2(url, opts);
+    };
+    w.document.getElementById('edit-name').value = 'Grafana Ops';
+    w.document.getElementById('edit-scheme').value = 'https://';
+    w.document.getElementById('edit-url').value = 'grafana.example.com';
+    await w.__HUB__.saveEdit();
+    ok(apiLog.some(x => x === 'PUT /api/services/svc-1'), 'save issues PUT to /api/services/<id>');
+    ok(lastPutBody && lastPutBody.url === 'https://grafana.example.com', 'save PUTs scheme + host URL', lastPutBody && lastPutBody.url);
+    ok(modal.classList.contains('hidden'), 'modal closes after save');
+    const renamed = Array.from(w.document.querySelectorAll('.card')).some(c => c.dataset.name === 'grafana ops');
+    ok(renamed, 'renamed card rendered after save');
+
+    // Delete issues DELETE and re-renders
+    apiLog = [];
+    stubFetch(CANNED);
+    await w.__HUB__.remove('svc-3');
+    ok(apiLog.some(x => x === 'DELETE /api/services/svc-3'), 'remove issues DELETE to /api/services/<id>');
+    const cardsAfter = w.document.querySelectorAll('.card');
+    ok(cardsAfter.length === CANNED.length - 1, 'card removed after delete', 'got ' + cardsAfter.length);
+
+    // Status dot exists on each pingable card
+    const dots = w.document.querySelectorAll('.status-dot');
+    ok(dots.length > 0, 'status dots present on cards');
+
+    // / shortcut does not steal focus while typing in an input
+    w.document.getElementById('add-form').classList.remove('hidden');
+    w.document.getElementById('add-name').focus();
+    ok(w.document.activeElement === w.document.getElementById('add-name'), 'add-name focused');
+    w.document.dispatchEvent(new w.KeyboardEvent('keydown', { key: '/' }));
+    ok(w.document.activeElement === w.document.getElementById('add-name'), '/ while typing in an input does not focus search');
+    w.document.getElementById('add-form').classList.add('hidden');
+    w.document.activeElement.blur();
+    w.document.dispatchEvent(new w.KeyboardEvent('keydown', { key: '/' }));
+    ok(!w.document.getElementById('search-modal').classList.contains('hidden'), '/ with no input focused opens the search popup');
+    ok(w.document.activeElement === w.document.getElementById('search-modal-input'), '/ focuses the search popup input');
+    w.__HUB__.closeSearch();
+
+    // f opens the search popup when not typing
+    w.document.getElementById('add-form').classList.remove('hidden');
+    w.document.getElementById('add-name').focus();
+    w.document.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'f' }));
+    ok(w.document.activeElement === w.document.getElementById('add-name'), 'f while typing in an input does not steal focus');
+    w.document.getElementById('add-form').classList.add('hidden');
+    w.document.activeElement.blur();
+    w.document.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'f' }));
+    ok(!w.document.getElementById('search-modal').classList.contains('hidden'), 'f with no input focused opens the search popup');
+    ok(w.document.activeElement === w.document.getElementById('search-modal-input'), 'f focuses the search popup input');
+    w.__HUB__.closeSearch();
+
+    // f while the search popup is open must not close it or steal focus
+    w.document.getElementById('search').dispatchEvent(new w.MouseEvent('click'));
+    ok(!w.document.getElementById('search-modal').classList.contains('hidden'), 'popup open for f guard test');
+    w.document.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'f' }));
+    ok(w.document.activeElement === w.document.getElementById('search-modal-input'), 'f with popup open keeps focus in popup input');
+    ok(!w.document.getElementById('search-modal').classList.contains('hidden'), 'f does not close the search popup');
+    w.__HUB__.closeSearch();
+
+    // Scheme dropdown: pasting a full URL strips the scheme and sets the select
+    const addScheme = w.document.getElementById('add-scheme');
+    const addUrlField = w.document.getElementById('add-url');
+    addScheme.value = 'https://';
+    addUrlField.value = 'https://immich.canzodal.com';
+    addUrlField.dispatchEvent(new w.Event('input'));
+    eq(addScheme.value, 'https://', 'pasting https URL sets scheme select to https');
+    eq(addUrlField.value, 'immich.canzodal.com', 'pasting full URL strips the scheme');
+
+    // Submit builds scheme + host into the POST payload
+    apiLog = [];
+    stubFetch(CANNED);
+    let lastPostBody = null;
+    const prevFetch = w.fetch;
+    w.fetch = (url, opts = {}) => {
+      if ((opts.method || 'GET') === 'POST' && String(url).includes('/api/services')) {
+        lastPostBody = JSON.parse(opts.body);
+      }
+      return prevFetch(url, opts);
+    };
+    addScheme.value = 'http://';
+    addUrlField.value = '192.168.1.50:8096';
+    w.document.getElementById('add-name').value = 'Jellyfin';
+    w.document.getElementById('add-desc').value = 'Movies';
+    w.document.getElementById('add-form').dispatchEvent(new w.Event('submit'));
+    await new Promise(r => setTimeout(r, 10));
+    ok(apiLog.some(x => x === 'POST /api/services'), 'add form submits POST to /api/services');
+    ok(lastPostBody && lastPostBody.url === 'http://192.168.1.50:8096', 'submit builds full URL from scheme + host', lastPostBody && lastPostBody.url);
+    w.document.getElementById('add-name').value = '';
+    w.document.getElementById('add-desc').value = '';
+    addUrlField.value = '';
+
+    // Default domain — bare host expands to host.<domain>
+    w.HubSettings.set({ defaultDomain: 'canozdal.com' });
+    apiLog = [];
+    stubFetch(CANNED);
+    lastPostBody = null;
+    w.fetch = (url, opts = {}) => {
+      if ((opts.method || 'GET') === 'POST' && String(url).includes('/api/services')) {
+        lastPostBody = JSON.parse(opts.body);
+      }
+      return prevFetch(url, opts);
+    };
+    addScheme.value = 'https://';
+    addUrlField.value = 'n8n';
+    w.document.getElementById('add-name').value = 'n8n';
+    w.document.getElementById('add-form').dispatchEvent(new w.Event('submit'));
+    await new Promise(r => setTimeout(r, 10));
+    ok(lastPostBody && lastPostBody.url === 'https://n8n.canozdal.com', 'default domain expands bare host', lastPostBody && lastPostBody.url);
+    w.document.getElementById('add-name').value = '';
+
+    // Default domain — host with a dot is left untouched
+    apiLog = [];
+    stubFetch(CANNED);
+    lastPostBody = null;
+    w.fetch = (url, opts = {}) => {
+      if ((opts.method || 'GET') === 'POST' && String(url).includes('/api/services')) {
+        lastPostBody = JSON.parse(opts.body);
+      }
+      return prevFetch(url, opts);
+    };
+    addScheme.value = 'https://';
+    addUrlField.value = 'n8n.example.com';
+    w.document.getElementById('add-name').value = 'n8n2';
+    w.document.getElementById('add-form').dispatchEvent(new w.Event('submit'));
+    await new Promise(r => setTimeout(r, 10));
+    ok(lastPostBody && lastPostBody.url === 'https://n8n.example.com', 'host with a dot is not expanded', lastPostBody && lastPostBody.url);
+    w.document.getElementById('add-name').value = '';
+    addUrlField.value = '';
+    w.HubSettings.set({ defaultDomain: '' });
+
+    // Bookmarks — GET renders a tile per bookmark
+    const BMS = [
+      { id: 'bm-1', name: 'Homelab Wiki', url: 'https://wiki.example.com', color: '#22C55E' },
+      { id: 'bm-2', name: 'Dashboards',  url: 'https://grafana.example.com' },
+    ];
+    let lastBmPost = null;
+    function stubFetchAll(bms) {
+      w.fetch = (url, opts = {}) => {
+        const method = opts.method || 'GET';
+        apiLog.push(method + ' ' + url);
+        if (String(url).includes('/api/services')) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ services: CANNED }) });
+        }
+        if (String(url).includes('/api/bookmarks')) {
+          if (method === 'GET') return Promise.resolve({ ok: true, json: () => Promise.resolve({ bookmarks: bms }) });
+          if (method === 'POST') {
+            lastBmPost = JSON.parse(opts.body);
+            const created = { id: 'bm-new', ...lastBmPost };
+            return Promise.resolve({ ok: true, json: () => Promise.resolve({ bookmarks: [...bms, created] }) });
+          }
+        }
+        return Promise.resolve({ ok: false, json: () => Promise.resolve({ error: 'nope' }) });
+      };
+    }
+
+    apiLog = [];
+    stubFetchAll(BMS);
+    await w.__HUB__.loadBookmarks();
+    const bmTiles = w.document.querySelectorAll('#bookmarks a');
+    ok(apiLog.some(x => x === 'GET /api/bookmarks'), 'loadBookmarks GETs /api/bookmarks');
+    ok(bmTiles.length === BMS.length, 'bookmarks card renders a tile per bookmark', 'got ' + bmTiles.length);
+    ok(bmTiles[0] && bmTiles[0].target === '_blank', 'bookmark tile opens in new tab (target=_blank)');
+    ok(bmTiles[0] && bmTiles[0].rel === 'noopener noreferrer', 'bookmark tile has rel noopener noreferrer', bmTiles[0] && bmTiles[0].rel);
+    const dotColored = bmTiles[0] && bmTiles[0].querySelector('span');
+    const dotDefault = bmTiles[1] && bmTiles[1].querySelector('span');
+    ok(dotColored && /background:#22C55E/.test(dotColored.getAttribute('style') || ''),
+       'bookmark tile dot renders the bookmark color (#22C55E)', dotColored && dotColored.getAttribute('style'));
+    ok(dotDefault && /background:var\(--accent\)/.test(dotDefault.getAttribute('style') || ''),
+       'bookmark tile dot falls back to var(--accent) when no color', dotDefault && dotDefault.getAttribute('style'));
+
+    // Add flow POSTs /api/bookmarks, re-renders, and hides the editor
+    apiLog = [];
+    lastBmPost = null;
+    stubFetchAll(BMS);
+    w.document.getElementById('bookmark-name').value = 'Kick';
+    w.document.getElementById('bookmark-url').value = 'youtube.com';
+    w.document.getElementById('bookmarks-editor').dispatchEvent(new w.Event('submit'));
+    await new Promise(r => setTimeout(r, 10));
+    ok(apiLog.some(x => x === 'POST /api/bookmarks'), 'bookmark add POSTs /api/bookmarks');
+    ok(lastBmPost && lastBmPost.name === 'Kick' && lastBmPost.url === 'https://youtube.com',
+       'add posts name + url with https:// prefix', lastBmPost && JSON.stringify(lastBmPost));
+    const tilesAfter = w.document.querySelectorAll('#bookmarks a');
+    ok(tilesAfter.length === BMS.length + 1, 'new bookmark tile rendered after add', 'got ' + tilesAfter.length);
+    ok(w.document.getElementById('bookmarks-editor').classList.contains('hidden'), 'editor hides after save');
+
+    // Beszel — enabled + systems renders one row per server
+    apiLog = [];
+    w.fetch = (url, opts = {}) => {
+      apiLog.push('GET ' + url);
+      if (String(url).includes('/api/beszel')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ enabled: true, systems: [{ name: 'casaos', host: 'ubuntu', uptime: 9000721, cpu: 42, mem: 55, disk: 61, status: 'up' }] }) });
+      }
+      return Promise.resolve({ ok: false, json: () => Promise.resolve({ error: 'nope' }) });
+    };
+    await w.__HUB__.pollStats();
+    let beszelGrid = w.document.getElementById('stats-grid');
+    ok(apiLog.some(x => x === 'GET /api/beszel'), 'pollStats GETs /api/beszel');
+    ok(beszelGrid.textContent.includes('casaos'), 'beszel row renders server name', beszelGrid.textContent.slice(0, 60));
+    ok(beszelGrid.textContent.includes('up'), 'beszel row renders server status');
+    ok(beszelGrid.textContent.includes('104d'), 'beszel row shows formatted uptime', beszelGrid.textContent.slice(0, 80));
+    ok(beszelGrid.className.includes('grid-cols-2'), 'beszel grid uses 2 columns', beszelGrid.className);
+    ok(beszelGrid.querySelector('div[style*="width:42%"]') !== null, 'beszel CPU bar rendered at 42%');
+
+    // Beszel uptime toggle-off → formatted uptime hidden, then restored
+    w.HubSettings.set({ features: { beszelUptime: false } });
+    await w.__HUB__.pollStats();
+    beszelGrid = w.document.getElementById('stats-grid');
+    ok(!beszelGrid.textContent.includes('104d'), 'beszel uptime hidden when toggle off');
+    w.HubSettings.set({ features: { beszelUptime: true } });
+
+    // Beszel disabled → single-host fallback renders via /api/stats
+    apiLog = [];
+    w.fetch = (url, opts = {}) => {
+      apiLog.push('GET ' + url);
+      if (String(url).includes('/api/beszel')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ enabled: false }) });
+      }
+      if (String(url).includes('/api/stats')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ host: 'home', cpu: 10, mem: 20, disk: 30 }) });
+      }
+      return Promise.resolve({ ok: false, json: () => Promise.resolve({ error: 'nope' }) });
+    };
+    await w.__HUB__.pollStats();
+    await new Promise(r => setTimeout(r, 10));
+    ok(apiLog.some(x => x === 'GET /api/beszel'), 'fallback pollStats GETs /api/beszel first');
+    ok(apiLog.some(x => x === 'GET /api/stats'), 'fallback GETs /api/stats');
+    const cpuValEl = w.document.getElementById('stat-cpu-val');
+    ok(cpuValEl && cpuValEl.textContent === '10%', 'fallback renders CPU bar value via /api/stats', cpuValEl && cpuValEl.textContent);
+    beszelGrid = w.document.getElementById('stats-grid');
+    ok(beszelGrid.className.includes('grid-cols-3'), 'fallback restores 3-column grid', beszelGrid.className);
+    ok(!beszelGrid.textContent.includes('casaos'), 'fallback clears beszel rows');
+
+    // Restore default state for any subsequent test runs
+    w.HubSettings.set({ theme: 'auto', features: {}, services: [], wallpaper: { mode: 'none', gradient: 'aurora', url: '' } });
+  };
+
+  runSettingsDomTests = async function () {
+    const sw = sWin;
+    const sel = sw.document.getElementById('search-provider');
+    const row = sw.document.getElementById('searxng-row');
+    const url = sw.document.getElementById('searxng-url');
+    ok(sel && sel.tagName === 'SELECT', 'settings: search-provider select exists');
+    ok(row, 'settings: searxng URL row exists');
+    eq(sw.HubSettings.get().search.provider, 'google', 'settings: default search provider is google');
+    ok(row.style.display === 'none', 'settings: searxng row hidden for google provider');
+
+    // Selecting SearXNG reveals the row and persists the provider
+    sel.value = 'searxng';
+    sel.dispatchEvent(new sw.Event('change'));
+    ok(row.style.display !== 'none', 'settings: selecting SearXNG reveals the URL row');
+    eq(sw.HubSettings.get().search.provider, 'searxng', 'settings: provider change persisted to HubSettings');
+
+    // Typing a URL persists it
+    url.value = 'https://searx.example.com';
+    url.dispatchEvent(new sw.Event('input'));
+    eq(sw.HubSettings.get().search.searxngUrl, 'https://searx.example.com', 'settings: searxng URL persisted');
+
+    // Switching back to Google hides the row again
+    sel.value = 'google';
+    sel.dispatchEvent(new sw.Event('change'));
+    ok(row.style.display === 'none', 'settings: switching back to Google hides the URL row');
+
+    // Startpage is an available provider, persists, and keeps the URL row hidden
+    ok(Array.from(sel.options).some(o => o.value === 'startpage' && o.text === 'Startpage'), 'settings: Startpage option exists in the provider menu');
+    sel.value = 'startpage';
+    sel.dispatchEvent(new sw.Event('change'));
+    eq(sw.HubSettings.get().search.provider, 'startpage', 'settings: Startpage provider persisted');
+    ok(row.style.display === 'none', 'settings: Startpage keeps the searxng URL row hidden');
+
+    // Cleanup — leave defaults for other suites
+    sw.HubSettings.set({ search: { provider: 'google', searxngUrl: '' } });
+  };
+</script>
+</body>
+</html>

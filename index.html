@@ -1,0 +1,1794 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Server Hub — Self-Hosted Services</title>
+  <meta name="description" content="Server Hub — your apps and services, reachable from one place." />
+  <link rel="icon" type="image/png" href="logo.png" />
+  <link rel="preconnect" href="https://cdn.tailwindcss.com" crossorigin />
+  <link rel="preconnect" href="https://images.pexels.com" crossorigin />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <script>
+    tailwind.config = { darkMode: 'class', theme: { extend: {
+      fontFamily: {
+        sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        mono: ['Fira Code', 'ui-monospace', 'monospace'],
+      },
+    }}};
+  </script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="categorize.js"></script>
+  <script src="settings.js"></script>
+  <style>
+    /* ============================================================
+       Theme tokens — DARK (default) and LIGHT via html.light
+       ============================================================ */
+    :root {
+      --bg-deep: #020203; --bg-base: #050506; --bg-elev: #0a0a0c;
+      --surface: rgba(255,255,255,0.05);    --surface-hi: rgba(255,255,255,0.08);
+      --border: rgba(255,255,255,0.08);    --border-hi: rgba(255,255,255,0.16);
+      --fg: #EDEDEF; --fg-muted: #8A8F98;
+      --accent: #5E6AD2; --accent-glow: rgba(94,106,210,0.20);
+      --green: #22C55E; --red: #EF4444; --amber: #EAB308;
+      --blob-a: #5E6AD2; --blob-b: #8B5CF6; --blob-c: #22C55E;
+      --blob-opacity: 0.18;
+      --surface-glass: 0.05; --surface-glass-hi: 0.08;
+      --scrim: rgba(0,0,0,0.55);
+      --ease: cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    html.light {
+      --bg-deep: #f4f6fb; --bg-base: #ffffff; --bg-elev: #fbfcfe;
+      --surface: rgba(15,23,42,0.04);   --surface-hi: rgba(15,23,42,0.08);
+      --border: rgba(15,23,42,0.10);    --border-hi: rgba(15,23,42,0.20);
+      --fg: #0F172A; --fg-muted: #5a6072;
+      --accent: #4f56c0; --accent-glow: rgba(79,86,192,0.18);
+      --green: #16a34a; --red: #dc2626; --amber: #ca8a04;
+      --blob-a: #818cf8; --blob-b: #c4b5fd; --blob-c: #86efac;
+      --blob-opacity: 0.35;
+      --scrim: rgba(15,23,42,0.40);
+    }
+
+    /* ============================================================
+       Wallpaper readability — html.wallpaper-light / html.wallpaper-dark
+       toggled by HubSettings.applyWallpaper (settings.js). Keeps glass
+       + text readable over any wallpaper; .wallpaper is set on <body>.
+       ============================================================ */
+    html.wallpaper-light { --surface: rgba(255,255,255,0.75); --surface-hi: rgba(255,255,255,0.85); --border: rgba(0,0,0,0.12); --border-hi: rgba(0,0,0,0.2); --fg: #111318; --fg-muted: #3d4148; }
+    html.wallpaper-light .glass { backdrop-filter: blur(14px); }
+    html.wallpaper-dark { --surface: rgba(0,0,0,0.55); --surface-hi: rgba(0,0,0,0.65); --border: rgba(255,255,255,0.1); --border-hi: rgba(255,255,255,0.18); --fg: #EDEDEF; --fg-muted: #A7ABB3; }
+    html.wallpaper-dark .glass { backdrop-filter: blur(14px); }
+    /* Light theme ALWAYS wins over wallpaper readability classes — declared
+       after them so source order keeps light tokens active even when a dark
+       gradient/image wallpaper sets html.wallpaper-dark. Glossy cards stay
+       readable (near-opaque) on any wallpaper. */
+    html.light.wallpaper-dark,
+    html.light.wallpaper-light {
+      --surface: rgba(255,255,255,0.92); --surface-hi: rgba(255,255,255,0.96);
+      --border: rgba(15,23,42,0.12); --border-hi: rgba(15,23,42,0.20);
+      --fg: #0F172A; --fg-muted: #5a6072;
+    }
+    html.light.wallpaper-dark .glass,
+    html.light.wallpaper-light .glass { backdrop-filter: blur(16px); }
+    html.wallpaper .glass, body.wallpaper .glass { box-shadow: 0 4px 24px -8px rgba(0,0,0,0.35); }
+    body.wallpaper { background-color: transparent; background-image: none; }
+    html.wallpaper-dark, html.wallpaper-light { background-color: transparent; }
+
+    /* Wallpaper layer — #wallpaper is a fixed, viewport-sized element behind
+       the content (z-index -1). Painting the wallpaper here (via --wp-image,
+       toggled by HubSettings.applyWallpaper with the wp-active class) means
+       `cover` is always computed against the viewport: adding services or
+       navigating between pages never re-scales the image, so there is no zoom.
+       Opacity cross-fades smoothly when the wallpaper appears or changes. */
+    #wallpaper {
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      pointer-events: none;
+      background-image: var(--wp-image, none);
+      background-size: cover;
+      background-position: center;
+      background-repeat: no-repeat;
+      opacity: 0;
+      transition: opacity 700ms var(--ease);
+    }
+    body.wallpaper.wp-active #wallpaper {
+      opacity: 1;
+    }
+
+    * { -webkit-tap-highlight-color: transparent; }
+    html { -webkit-text-size-adjust: 100%; scrollbar-gutter: stable; }
+    html, body { background-color: var(--bg-deep); color: var(--fg); }
+    body { overscroll-behavior-y: contain; }
+    body {
+      background:
+        radial-gradient(1200px 800px at 12% -8%, color-mix(in srgb, var(--blob-a) 16%, transparent), transparent 60%),
+        radial-gradient(900px 700px at 92% 8%,  color-mix(in srgb, var(--blob-b) 12%, transparent), transparent 55%),
+        linear-gradient(180deg, color-mix(in srgb, var(--bg-elev) 80%, var(--bg-deep)) 0%, var(--bg-deep) 70%);
+      min-height: 100vh;
+      transition: background-color 400ms var(--ease), color 400ms var(--ease);
+    }
+    /* Ambient blobs — pre-blurred radial gradients instead of filter: blur().
+       A blurred solid circle looks exactly like a soft radial fade, but the
+       filter would force the browser to re-rasterize a huge blurred region on
+       every animation frame (the main-page scroll jank). Gradient = same look,
+       ~zero cost. */
+    .blob {
+      position: fixed; border-radius: 9999px;
+      opacity: var(--blob-opacity); pointer-events: none; z-index: 0;
+      animation: drift 22s var(--ease) infinite alternate;
+      /* Promote to its own compositor layer so the drift animation never
+         touches the main thread — keeps scrolling buttery smooth. */
+      will-change: transform;
+      transform: translateZ(0);
+    }
+    .blob.a { width: 420px; height: 420px; background: radial-gradient(circle, var(--blob-a) 0%, transparent 72%); top: -120px; left: -80px; }
+    .blob.b { width: 360px; height: 360px; background: radial-gradient(circle, var(--blob-b) 0%, transparent 72%); top: 10vh;  right: -120px; animation-delay: -6s; }
+    .blob.c { width: 320px; height: 320px; background: radial-gradient(circle, var(--blob-c) 0%, transparent 72%); bottom: -120px; left: 35%; opacity: calc(var(--blob-opacity) * 0.55); animation-delay: -12s; }
+    @keyframes drift {
+      0%   { transform: translate3d(0,0,0) scale(1); }
+      50%  { transform: translate3d(40px,30px,0) scale(1.08); }
+      100% { transform: translate3d(-30px,-20px,0) scale(0.96); }
+    }
+    .glass {
+      background: var(--surface);
+      backdrop-filter: blur(20px) saturate(140%);
+      -webkit-backdrop-filter: blur(20px) saturate(140%);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      transition: background-color 300ms var(--ease), border-color 300ms var(--ease);
+      /* Isolate backdrop sampling to this element's stacking context — prevents
+         the blur from re-sampling the entire page on every scroll frame. */
+      isolation: isolate;
+    }
+    .glass:hover { background: var(--surface-hi); border-color: var(--border-hi); }
+    .toast {
+      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+      background: var(--surface-hi); border: 1px solid var(--border-hi);
+      color: var(--fg); padding: 0.55rem 1rem; border-radius: 12px;
+      font-size: 0.8rem; box-shadow: 0 12px 32px -12px rgba(0,0,0,.5);
+      z-index: 60; transition: opacity 200ms var(--ease);
+    }
+    .toast.hidden { opacity: 0; pointer-events: none; }
+    .card { transition: transform 250ms var(--ease), background-color 250ms var(--ease), border-color 250ms var(--ease), box-shadow 250ms var(--ease); }
+    .card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 12px 40px -16px var(--accent-glow), 0 0 0 1px var(--border-hi);
+    }
+    .accent-bar { background: linear-gradient(180deg, var(--accent), transparent); box-shadow: 0 0 12px var(--accent-glow); }
+    .status-dot {
+      width: 8px; height: 8px; border-radius: 9999px; display: inline-block;
+      transition: background-color 300ms var(--ease), box-shadow 300ms var(--ease);
+    }
+    .status-up    { background-color: var(--green); box-shadow: 0 0 8px color-mix(in srgb, var(--green) 65%, transparent); }
+    .status-down  { background-color: var(--red);   box-shadow: 0 0 8px color-mix(in srgb, var(--red) 65%, transparent); }
+    .status-wait  { background-color: var(--amber); box-shadow: 0 0 8px color-mix(in srgb, var(--amber) 65%, transparent); }
+    .status-idle  { background-color: var(--fg-muted); }
+    .skel { background: linear-gradient(90deg, color-mix(in srgb, var(--border) 40%, transparent), color-mix(in srgb, var(--border) 80%, transparent), color-mix(in srgb, var(--border) 40%, transparent)); background-size: 200% 100%; animation: shimmer 1.4s linear infinite; border-radius: 6px; }
+    @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+    .skeleton-card { height: 92px; }
+    .reveal { opacity: 0; transform: translateY(8px); }
+    .reveal.shown { opacity: 1; transform: none; transition: opacity 400ms var(--ease), transform 400ms var(--ease); }
+    .group-header { color: var(--fg-muted); letter-spacing: 0.08em; }
+    input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; }
+    .focus-ring:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+     /* Float the sidebar through the services flow without changing the DOM. */
+     @media (min-width: 1024px) {
+       main[class] { display: block !important; }
+       header.flex { display: block !important; }
+       header > div:first-child {
+         display: block !important;
+         float: left;
+         width: calc(100% - 352px);
+       }
+       header > div:first-child > div[data-feature="search"] { margin-top: 1.5rem; }
+       header > aside {
+         float: right !important;
+         width: 320px !important;
+         margin-left: 1.5rem !important;
+         margin-bottom: 1.5rem !important;
+       }
+       header::after {
+         content: '';
+         display: block;
+         clear: left;
+       }
+       #root { display: block !important; }
+       #groups-cols { display: contents !important; }
+       #groups .group {
+         display: flow-root !important;
+         width: auto !important;
+         min-width: 0;
+       }
+       #groups .group { margin-top: 0 !important; }
+       #groups .group.w-full { margin-bottom: 2rem; }
+       #groups .group:not(.w-full) {
+         display: inline-block !important;
+         width: calc(25% - 1.5rem) !important;
+         vertical-align: top;
+         margin-right: 1.5rem;
+         margin-bottom: 2rem;
+       }
+       #groups .group.w-full > div.grid {
+         grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+       }
+       #groups .group { container-type: inline-size; }
+       @container (min-width: 1000px) {
+         #groups .group.w-full > div.grid {
+           grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+         }
+       }
+     }
+
+     @media (max-width: 1023px) {
+       main[class] { display: flex; }
+       header::after { display: none; }
+       header > div:first-child { float: none; width: auto; }
+       header > aside {
+         float: none !important;
+         width: auto !important;
+         margin-left: 0 !important;
+         margin-bottom: 0 !important;
+       }
+       #groups-cols { display: flex !important; }
+       #groups .group {
+         display: block !important;
+         width: auto !important;
+         margin: 0 !important;
+       }
+     }
+
+    /* Theme toggle button — 3-state cycle */
+    .theme-btn {
+      width: 38px; height: 38px; display: inline-flex; align-items: center; justify-content: center;
+      border-radius: 10px; border: 1px solid var(--border); color: var(--fg);
+      background: var(--surface); cursor: pointer;
+      transition: background-color 200ms var(--ease), border-color 200ms var(--ease), transform 200ms var(--ease);
+    }
+    .theme-btn:hover { background: var(--surface-hi); border-color: var(--border-hi); transform: scale(1.04); }
+    .theme-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .theme-btn-disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* Add-service form */
+    .form-inline { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+    .form-inline-stack { grid-template-columns: 1fr; }
+    @media (max-width: 640px) { .form-inline { grid-template-columns: 1fr; } }
+    .form-input {
+      background: transparent; border: 1px solid var(--border); border-radius: 10px;
+      color: var(--fg); padding: 0.55rem 0.75rem; font-size: 0.875rem; width: 100%;
+      transition: border-color 200ms var(--ease), background-color 200ms var(--ease);
+    }
+    .form-input::placeholder { color: var(--fg-muted); }
+    .form-input:focus { outline: none; border-color: var(--accent); background: var(--surface); }
+    .search-input:focus { outline: none; border-color: var(--accent); }
+    .search-input:focus-visible { outline: none; }
+    .btn-primary {
+      background: var(--accent); color: white; border: none; padding: 0.55rem 1rem;
+      border-radius: 10px; font-size: 0.875rem; font-weight: 500; cursor: pointer;
+      transition: background-color 200ms var(--ease), transform 150ms var(--ease);
+    }
+    .btn-primary:hover { background: color-mix(in srgb, var(--accent) 88%, white); transform: translateY(-1px); }
+    .btn-primary:active { transform: translateY(0); }
+    .btn-primary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .btn-ghost {
+      background: transparent; color: var(--fg-muted); border: 1px solid var(--border);
+      padding: 0.55rem 0.85rem; border-radius: 10px; font-size: 0.875rem; cursor: pointer;
+      transition: color 200ms var(--ease), border-color 200ms var(--ease);
+    }
+    .btn-ghost:hover { color: var(--fg); border-color: var(--border-hi); }
+    .chip {
+      display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px;
+      border-radius: 9999px; font-size: 11px; font-family: 'Fira Code', monospace;
+      border: 1px solid var(--border); color: var(--fg-muted); background: var(--surface);
+    }
+    .chip-user { color: var(--green); border-color: color-mix(in srgb, var(--green) 40%, var(--border)); }
+    .chip-link { cursor: pointer; transition: border-color 200ms var(--ease), color 200ms var(--ease); }
+    .chip-link:hover { border-color: var(--red); color: var(--red); }
+
+    .card-actions { opacity: 0; transition: opacity 200ms var(--ease); }
+    .card:hover .card-actions, .card:focus-within .card-actions { opacity: 1; }
+    .card-action {
+      color: var(--fg-muted); background: transparent; border: none; cursor: pointer;
+      padding: 4px; border-radius: 8px; transition: color 150ms var(--ease), background-color 150ms var(--ease);
+    }
+    .card-action:hover { color: var(--fg); background: var(--surface-hi); }
+    .card-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .icon-opt {
+      padding: 6px; border-radius: 10px; border: 1px solid var(--border);
+      color: var(--fg-muted); background: transparent; cursor: pointer; display: flex;
+      align-items: center; justify-content: center;
+      transition: color 150ms var(--ease), border-color 150ms var(--ease), background-color 150ms var(--ease);
+    }
+    .icon-opt:hover { color: var(--fg); border-color: var(--border-hi); }
+    .icon-opt.selected { color: var(--accent); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 50; }
+    .modal-panel {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      width: min(92vw, 420px); max-height: 88vh; overflow-y: auto;
+      background: var(--surface); border: 1px solid var(--border-hi); border-radius: 18px;
+      padding: 1.25rem; z-index: 51; box-shadow: 0 24px 64px -20px rgba(0,0,0,.6);
+    }
+    /* Fullscreen search overlay — blurred backdrop, large centered input */
+    #search-modal:not(.hidden) { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; padding: 1.25rem; }
+    #search-modal .modal-backdrop { background: rgba(0,0,0,.55); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+    #search-panel {
+      position: relative; z-index: 61; width: min(92vw, 640px);
+      background: var(--surface); border: 1px solid var(--border-hi); border-radius: 20px;
+      padding: 1.5rem; box-shadow: 0 32px 80px -24px rgba(0,0,0,.7);
+    }
+    #search-modal-input { font-size: 1.25rem; padding: 0.85rem 1rem; }
+
+    /* Keyboard-selected suggestion — a thin accent frame plus the surface
+       highlight so the current row is clearly visible in both themes. */
+    #search-suggestions .suggestion-selected {
+      background: var(--surface-hi);
+      border: 1px solid var(--accent);
+      box-shadow: 0 0 0 1px var(--accent-glow), 0 0 12px -4px var(--accent-glow);
+    }
+
+    /* Modal open/close animation (fade + scale from center) */
+    @keyframes modal-in {
+      from { opacity: 0; transform: translate(-50%, -50%) scale(0.96); }
+      to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    }
+    /* Search panel is centered by flex, not translate — keep it that way. */
+    @keyframes search-in {
+      from { opacity: 0; transform: translateY(10px) scale(0.97); }
+      to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    #add-modal:not(.hidden) .modal-panel,
+    #edit-modal:not(.hidden) .modal-panel { animation: modal-in 240ms var(--ease); }
+    #search-modal:not(.hidden) #search-panel { animation: search-in 240ms var(--ease); }
+    #add-modal:not(.hidden) .modal-backdrop,
+    #edit-modal:not(.hidden) .modal-backdrop,
+    #search-modal:not(.hidden) .modal-backdrop { animation: backdrop-in 240ms var(--ease); }
+    @keyframes backdrop-in {
+      from { opacity: 0; }
+      to   { opacity: 1; }
+    }
+
+    #groups-cols { animation: groups-in 500ms var(--ease) both; }
+
+    /* Scroll performance: off-screen category sections are skipped by the
+       renderer instead of being laid out/painted every scroll frame. This is
+       invisible (content looks identical when scrolled into view) and is the
+       standard fix for long-page scroll jank. contain-intrinsic-size keeps the
+       scrollbar stable before a section has been painted. */
+    #groups .group {
+      content-visibility: auto;
+      contain-intrinsic-size: auto 240px;
+    }
+    @keyframes groups-in {
+      from { opacity: 0; transform: translateY(10px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .blob { animation: none; }
+      .card, .reveal, .skel, body { transition: none; }
+      .reveal { opacity: 1; transform: none; }
+      .skel { animation: none; }
+      #groups-cols, .section { animation: none; }
+      #wallpaper { transition: none; }
+    }
+
+    /* ============================================================
+       Mobile performance — backdrop-filter is the #1 FPS killer.
+       Every .glass card with blur(20px) forces the browser to
+       sample and blur the backdrop per-card, per-frame while
+       scrolling. On desktop GPUs this is okay; on mobile it
+       drops to 12-13fps. These overrides keep layout/colors
+       identical but remove/rationalize GPU-heavy effects on
+       touch and small viewports to restore 60fps.
+       ============================================================ */
+    @media (max-width: 768px), (pointer: coarse), (hover: none) {
+      .glass,
+      html.wallpaper-light .glass,
+      html.wallpaper-dark .glass {
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+      }
+      #search-modal .modal-backdrop {
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+        background: rgba(0,0,0,0.60) !important;
+      }
+      .blob { animation: none !important; will-change: auto !important; transform: none !important; }
+      .card { transition: background-color 200ms var(--ease), border-color 200ms var(--ease) !important; }
+      .card:hover { transform: none !important; box-shadow: none !important; }
+      .glass:hover { background: var(--surface) !important; border-color: var(--border) !important; }
+      .reveal { opacity: 1 !important; transform: none !important; transition: none !important; }
+      .reveal.shown { transition: none !important; }
+      #groups-cols { animation: none !important; }
+      .skel { animation: none !important; }
+      #fab-add:hover, #fab-settings:hover { transform: none !important; }
+      #groups .group { contain-intrinsic-size: auto 320px; }
+    }
+    /* ============================================================
+       Mobile layout fixes — ONLY max-width: 768px. Desktop (1024+)
+       is NOT touched by a single pixel. Fixes:
+       - clock was text-right (far right) on phones → centered
+       - categories with >3 items looked short/unbalanced (single-col
+         + small placeholder) → 2-col compact grid, page shorter
+       ============================================================ */
+    @media (max-width: 768px) {
+      /* Clock: center on phones (was text-right) */
+      div[data-feature="clock"] {
+        text-align: center !important;
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: center !important;
+        justify-content: center !important;
+        width: 100% !important;
+      }
+      #clock, #date { text-align: center !important; }
+      /* 2-col grid for services — compact, page ~40% shorter */
+      #groups .group > div.grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        gap: 0.6rem !important;
+        grid-auto-rows: 1fr !important;
+        align-items: stretch !important;
+      }
+      /* Compact cards to fit 2 per row — fix cramped names + equal height */
+      .card {
+        padding: 0.65rem 0.6rem !important;
+        gap: 0.55rem !important;
+        border-radius: 14px !important;
+        height: 100% !important;
+        min-height: 74px !important;
+        align-items: center !important;
+      }
+      .card svg.w-6.h-6 { width: 1.25rem !important; height: 1.25rem !important; }
+      /* Hidden edit/delete actions still occupied 36px on mobile (hover disabled);
+         hide completely to free width for name/host */
+      .card-actions { display: none !important; }
+      /* Ensure truncate can actually use the freed space (nested flex needs min-w-0) */
+      .card > span.min-w-0.flex-1 { min-width: 0 !important; flex: 1 1 0% !important; }
+      .card > span.min-w-0.flex-1 > span.flex { min-width: 0 !important; }
+      /* Give 2-col grid a bit more breathing room on narrow phones */
+      main { padding-left: 0.75rem !important; padding-right: 0.75rem !important; }
+      /* Keep long hostnames readable in narrow 2-col cards */
+      .card .text-\[11px\] { font-size: 10px !important; }
+      /* Fix "short" groups: placeholder was 320px, 8 items single-col ≈680px;
+         2-col ≈360px, so 560px keeps scrollbar stable without jump. */
+      #groups .group { contain-intrinsic-size: auto 560px !important; }
+    }
+    @media (max-width: 640px) {
+      /* Stack logo+clock vertically and stretch on true phones */
+      header > div:first-child > div:first-child {
+        flex-direction: column !important;
+        align-items: stretch !important;
+      }
+    }
+    @media (max-width: 480px) {
+      #wallpaper { transition: none !important; }
+    }
+    @media (prefers-reduced-transparency: reduce) {
+      .glass, #search-modal .modal-backdrop { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+    }
+
+    #fab-add:hover { transform: scale(1.06); }
+    #fab-add:active { transform: scale(0.96); }
+    #fab-add:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+    #fab-settings:hover { transform: scale(1.06); }
+    #fab-settings:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+    /* When search feature is disabled, push settings FAB to the lower-left so it
+       doesn't sit against the empty search row on narrow viewports. */
+    body:not(:has([data-feature="search"]:not([style*="display: none"]))) #fab-settings { right: auto; left: 1.5rem; }
+  </style>
+</head>
+<body class="font-sans antialiased">
+  <div id="wallpaper" aria-hidden="true"></div>
+  <div data-feature="blobs">
+    <div class="blob a" aria-hidden="true"></div>
+    <div class="blob b" aria-hidden="true"></div>
+    <div class="blob c" aria-hidden="true"></div>
+  </div>
+
+  <main class="relative z-10 mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8 py-6 sm:py-8 flex flex-col min-h-[calc(100vh-3rem)]">
+
+    <!-- Header -->
+    <header class="flex flex-col gap-6 lg:flex-row lg:gap-8">
+      <div class="flex-1 min-w-0 flex flex-col gap-6">
+        <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+          <div class="flex items-start gap-3">
+            <div class="flex flex-col items-center gap-2 shrink-0">
+              <img src="logo.png" alt="Server Hub" class="w-9 h-9 rounded-xl" />
+              <button id="theme-toggle" class="theme-btn" title="Toggle theme" aria-label="Toggle color theme">
+                <svg id="theme-icon" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"></svg>
+              </button>
+            </div>
+            <div data-feature="greeting">
+              <p class="text-sm text-[color:var(--fg-muted)] font-mono" id="greeting" data-greeting-name>Hello</p>
+              <h1 class="mt-1 text-3xl sm:text-4xl font-semibold tracking-tight" data-dynamic="true">Server Hub</h1>
+              <p class="mt-2 text-[color:var(--fg-muted)] max-w-md" data-dynamic-subtitle>Your apps and services, reachable from one place.</p>
+              <div class="mt-3 flex flex-wrap gap-2 items-center">
+                <span id="cf-chip" class="chip chip-user hidden"></span>
+                <button id="logout-btn" class="chip chip-link hidden" title="Log out" aria-label="Log out">
+                  <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                  Log out
+                </button>
+                <span id="theme-chip" class="chip"></span>
+              </div>
+            </div>
+          </div>
+          <div class="text-right" data-feature="clock">
+            <p id="clock" class="font-mono text-2xl sm:text-3xl tabular-nums" aria-live="polite">--:--:--</p>
+            <p id="date" class="text-sm text-[color:var(--fg-muted)] mt-1">—</p>
+          </div>
+        </div>
+
+        <!-- Search -->
+        <div data-feature="search" class="glass px-4 py-3 flex items-center gap-3">
+          <svg class="w-5 h-5 text-[color:var(--fg-muted)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+          <input id="search" type="search" inputmode="search" autocomplete="off" spellcheck="false"
+            placeholder="Filter services by name or description…" aria-label="Filter services"
+            class="flex-1 bg-transparent outline-none placeholder:text-[color:var(--fg-muted)] text-base search-input" />
+          <kbd class="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 text-xs text-[color:var(--fg-muted)] border border-[color:var(--border)] rounded-md font-mono">/</kbd>
+        </div>
+      </div>
+
+      <aside class="lg:w-80 shrink-0 flex flex-col gap-6">
+        <!-- System stats -->
+        <section aria-label="System statistics" data-feature="stats" class="glass p-4 sm:p-5">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-xs font-semibold uppercase group-header">System</h2>
+            <span id="stats-host" class="text-xs text-[color:var(--fg-muted)] font-mono">—</span>
+          </div>
+          <div class="grid grid-cols-3 gap-3 sm:gap-4" id="stats-grid">
+            <div class="space-y-1.5">
+              <div class="flex items-baseline justify-between">
+                <span class="text-xs text-[color:var(--fg-muted)]">CPU</span>
+                <span id="stat-cpu-val" class="font-mono text-sm tabular-nums">—</span>
+              </div>
+              <div class="h-1.5 bg-[color:var(--surface-hi)] rounded-full overflow-hidden"><div id="stat-cpu-bar" class="h-full w-0 bg-[color:var(--accent)] transition-all duration-700 ease-out"></div></div>
+            </div>
+            <div class="space-y-1.5">
+              <div class="flex items-baseline justify-between">
+                <span class="text-xs text-[color:var(--fg-muted)]">Memory</span>
+                <span id="stat-mem-val" class="font-mono text-sm tabular-nums">—</span>
+              </div>
+              <div class="h-1.5 bg-[color:var(--surface-hi)] rounded-full overflow-hidden"><div id="stat-mem-bar" class="h-full w-0 bg-[color:var(--accent)] transition-all duration-700 ease-out"></div></div>
+            </div>
+            <div class="space-y-1.5">
+              <div class="flex items-baseline justify-between">
+                <span class="text-xs text-[color:var(--fg-muted)]">Disk</span>
+                <span id="stat-disk-val" class="font-mono text-sm tabular-nums">—</span>
+              </div>
+              <div class="h-1.5 bg-[color:var(--surface-hi)] rounded-full overflow-hidden"><div id="stat-disk-bar" class="h-full w-0 bg-[color:var(--accent)] transition-all duration-700 ease-out"></div></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Bookmarks -->
+        <section aria-label="Bookmarks" id="bookmarks-card" class="glass p-4">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-xs font-semibold uppercase group-header">Bookmarks</h2>
+            <button id="bookmarks-add" class="btn-ghost text-xs" title="Add bookmark" aria-label="Add bookmark">+ Add</button>
+          </div>
+          <div id="bookmarks" class="flex flex-wrap gap-2"></div>
+          <form id="bookmarks-editor" class="hidden mt-3 space-y-2" autocomplete="off" novalidate>
+            <input id="bookmark-name" class="form-input" placeholder="Name (e.g. Homelab Wiki)" required />
+            <input id="bookmark-url" class="form-input" type="url" placeholder="https://…" required />
+            <div class="flex gap-2">
+              <button type="submit" class="btn-primary text-xs">Save</button>
+              <button type="button" id="bookmark-cancel" class="btn-ghost text-xs">Cancel</button>
+            </div>
+          </form>
+        </section>
+      </aside>
+    </header>
+
+    <!-- Services container -->
+    <div id="root" class="mt-3 space-y-8 flex-1">
+      <div id="skeletons" class="flex flex-wrap items-start gap-x-6 gap-y-8">
+        <div class="glass skeleton-card p-3 skel w-full"></div>
+        <div class="glass skeleton-card p-3 skel flex-1 min-w-[240px]"></div>
+        <div class="glass skeleton-card p-3 skel flex-1 min-w-[240px]"></div>
+        <div class="glass skeleton-card p-3 skel flex-1 min-w-[240px]"></div>
+      </div>
+      <div id="groups" class="space-y-8"></div>
+    </div>
+
+    <p id="empty" class="hidden mt-12 text-center text-[color:var(--fg-muted)]">No services match “<span id="empty-term"></span>”.</p>
+
+    <footer class="mt-8 pt-6 border-t border-[color:var(--border)] text-center text-xs text-[color:var(--fg-muted)] font-mono space-y-1">
+      <p id="footer-note">Created with <a href="https://github.com/eco-null/server-hub-multi" class="underline hover:text-[color:var(--accent)]" target="_blank" rel="noopener">Server Hub</a>.</p>
+    </footer>
+  </main>
+
+  <!-- Floating action button: quick add -->
+  <button id="fab-add" type="button" aria-label="Add service (opens the add form)"
+    title="Add service"
+    class="fixed bottom-6 right-6 z-30 w-14 h-14 rounded-full text-white shadow-lg flex items-center justify-center cursor-pointer"
+    style="background: var(--accent); box-shadow: 0 8px 28px -8px var(--accent-glow); transition: transform 200ms var(--ease), background-color 200ms var(--ease);">
+    <svg class="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+  </button>
+
+  <!-- Toast -->
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+  <!-- API offline notice -->
+  <div id="api-offline" class="hidden fixed top-4 left-1/2 -translate-x-1/2 z-40 glass px-4 py-2 rounded-xl text-xs text-[color:var(--fg-muted)]">
+    Can't reach the services API — showing the last loaded list. Edits won't persist until the server responds.
+  </div>
+
+  <!-- Search modal -->
+  <div id="search-modal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="search-title">
+    <div class="modal-backdrop" onclick="window.__HUB__.closeSearch()"></div>
+    <div id="search-panel">
+      <input id="search-modal-input" class="form-input w-full" placeholder="Search services or the web…" autocomplete="off" />
+      <div id="search-suggestions" class="flex flex-col gap-1 mt-3 max-h-72 overflow-y-auto"></div>
+    </div>
+  </div>
+
+  <!-- Add service modal -->
+  <div id="add-modal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="add-title">
+    <div class="modal-backdrop" onclick="window.__HUB__.closeAdd()"></div>
+    <div class="modal-panel space-y-3">
+      <div class="flex items-center justify-between mb-2">
+        <h2 id="add-title" class="text-xs font-semibold uppercase group-header">Add service — category auto-detected</h2>
+        <button id="add-toggle" type="button" class="btn-ghost text-xs" aria-expanded="false" aria-controls="add-form">
+          <span id="add-toggle-label">+ Add</span>
+        </button>
+      </div>
+      <form id="add-form" class="hidden form-inline form-inline-stack" autocomplete="off" novalidate>
+        <input id="add-name" class="form-input" placeholder="Name (e.g. Grafana)" required />
+        <div class="flex gap-1 min-w-0">
+          <select id="add-scheme" class="form-input w-28 shrink-0" aria-label="URL scheme">
+            <option value="https://" selected>https://</option>
+            <option value="http://">http://</option>
+          </select>
+          <input id="add-url" class="form-input min-w-0 flex-1" type="text" placeholder="host (e.g. immich.canzodal.com)" required />
+        </div>
+        <input id="add-desc" class="form-input" placeholder="Short description (optional)" />
+        <div class="flex items-center gap-2 col-span-full flex-wrap">
+          <button type="submit" class="btn-primary">Add &amp; auto-categorize</button>
+          <span id="add-preview" class="text-xs text-[color:var(--fg-muted)] font-mono"></span>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Edit modal -->
+  <div id="edit-modal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="edit-title">
+    <div class="modal-backdrop" onclick="window.__HUB__.closeEdit()"></div>
+    <div class="modal-panel space-y-3">
+      <h2 id="edit-title" class="text-base font-semibold">Edit link</h2>
+      <label class="block">
+        <span class="text-xs text-[color:var(--fg-muted)]">Name</span>
+        <input id="edit-name" class="form-input mt-1" placeholder="e.g. Grafana" />
+      </label>
+      <label class="block">
+        <span class="text-xs text-[color:var(--fg-muted)]">URL</span>
+        <div class="flex gap-1 mt-1">
+          <select id="edit-scheme" class="form-input w-28 shrink-0" aria-label="URL scheme">
+            <option value="https://" selected>https://</option>
+            <option value="http://">http://</option>
+          </select>
+          <input id="edit-url" class="form-input min-w-0 flex-1" type="text" placeholder="host (e.g. immich.canzodal.com)" />
+        </div>
+      </label>
+      <label class="block">
+        <span class="text-xs text-[color:var(--fg-muted)]">Description</span>
+        <input id="edit-desc" class="form-input mt-1" placeholder="Optional" />
+      </label>
+      <div>
+        <span class="text-xs text-[color:var(--fg-muted)]">Icon</span>
+        <div id="edit-icons" class="grid grid-cols-6 gap-2 mt-1"></div>
+      </div>
+      <label class="block">
+        <span class="text-xs text-[color:var(--fg-muted)]">Category</span>
+        <select id="edit-cat" class="form-input mt-1">
+          <option value="auto">Auto</option>
+        </select>
+      </label>
+      <div class="flex justify-end gap-2 pt-1">
+        <button id="edit-cancel" class="btn-ghost focus-ring" type="button">Cancel</button>
+        <button id="edit-save" class="btn-primary focus-ring" type="button">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Floating action button: settings -->
+  <a href="settings.html" id="fab-settings" aria-label="Open settings"
+    title="Settings"
+    class="fixed bottom-6 right-24 z-30 w-12 h-12 rounded-full glass flex items-center justify-center cursor-pointer"
+    style="transition: transform 200ms var(--ease); color: var(--fg);">
+    <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
+  </a>
+
+<script>
+  /* ============================================================
+     SERVICES — loaded from the server (services.json) via the API.
+     No bundled defaults; everything is added through the UI and
+     stored permanently on the server.
+     ============================================================ */
+  const SERVICES_DEFAULT = [];
+  const API_SERVICES = '/api/services';
+
+  /* ============================================================
+     Inline SVG icon set (Phosphor-style outline, 24px).
+     ============================================================ */
+  const ICONS = {
+    chart:        '<path d="M3 3v18h18"/><path d="m7 14 3-3 3 3 5-5"/>',
+    pulse:        '<path d="M3 12h4l2-7 4 14 2-7h6"/>',
+    database:     '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/>',
+    shield:       '<path d="M12 2 4 6v6c0 5 3.5 8 8 10 4.5-2 8-5 8-10V6Z"/>',
+    'shield-check':'<path d="M12 2 4 6v6c0 5 3.5 8 8 10 4.5-2 8-5 8-10V6Z"/><path d="m9 12 2 2 4-4"/>',
+    key:          '<circle cx="7.5" cy="15.5" r="3.5"/><path d="m10 13 9-9"/><path d="m15 8 2 2"/><path d="m18 5 2 2"/>',
+    lock:         '<rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+    'lock-key':    '<rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 7-2.7"/><circle cx="12" cy="15.5" r="1.5"/>',
+    cloud:        '<path d="M7 18a5 5 0 0 1 .5-9.98A6 6 0 0 1 19 9a4 4 0 0 1-1 8Z"/>',
+    note:         '<path d="M4 4h16v12l-4 4H4Z"/><path d="M16 20v-4h4"/><path d="M8 9h8M8 13h5"/>',
+    file:         '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z"/><path d="M14 3v6h6"/>',
+    film:         '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M17 9h4M3 15h4M17 15h4"/>',
+    music:        '<circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/><path d="M9 18V5l12-2v13"/>',
+    headphones:   '<path d="M4 14v-2a8 8 0 0 1 16 0v2"/><path d="M4 14a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2H4Z"/><path d="M20 14a2 2 0 0 0-2 2v2a2 2 0 0 0 2 2h-2-2Z"/>',
+    git:          '<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M6 8.5v7"/><path d="M15 12H8.5"/><path d="m11 9 3 3-3 3"/>',
+    branch:       '<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="8" r="2.5"/><path d="M6 8.5v7"/><path d="M18 10.5c0 4-4 3.5-7 5.5"/>',
+    terminal:     '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3"/><path d="M13 15h4"/>',
+    globe:        '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.5 4 5.5 4 9s-1.5 6.5-4 9c-2.5-2.5-4-5.5-4-9s1.5-6.5 4-9Z"/>',
+    home:         '<path d="m3 11 9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/>',
+    broadcast:    '<path d="M4.9 4.9a16 16 0 0 0 0 14.2"/><path d="M19.1 4.9a16 16 0 0 1 0 14.2"/><path d="M7.8 7.8a10 10 0 0 0 0 8.4"/><path d="M16.2 7.8a10 10 0 0 1 0 8.4"/><circle cx="12" cy="12" r="2"/>',
+    cog:          '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/>',
+    box:          '<path d="M21 8 12 3 3 8v8l9 5 9-5Z"/><path d="m3 8 9 5 9-5"/><path d="M12 13v8"/>',
+    shopping:     '<circle cx="9" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2 3h3l3 13h12l2-9H6"/><path d="M5 6h17"/>',
+    flask:        '<path d="M9 3h6"/><path d="M10 3v6L5 18a2 2 0 0 0 1.7 3h10.6A2 2 0 0 0 19 18l-5-9V3"/><path d="M7.5 14h9"/>',
+    sparkles:     '<path d="M12 2v6M9 5l3 3 3-3M5 9h14M3 12v6M6 15l-3 3 3 3M21 12v6M18 15l3 3-3 3"/>',
+    camera:       '<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2Z"/><circle cx="12" cy="13" r="4"/>',
+    image:        '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/>',
+    book:         '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z"/>',
+    gamepad:      '<path d="M6 11h4M8 9v4"/><path d="M15 9.5h.01M18 11.5h.01"/><path d="M17.3 5H6.7a4 4 0 0 0-4 4.4l.6 7A4 4 0 0 0 7.3 20h1a3.4 3.4 0 0 0 3.2-2.3l.5-1.4a2 2 0 0 1 3.8 0l.5 1.4a3.4 3.4 0 0 0 3.2 2.3h1a4 4 0 0 0 4-3.6l.6-7A4 4 0 0 0 17.3 5Z"/>',
+    wallet:       '<path d="M21 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2"/><path d="M21 7h-9a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h9Z"/><circle cx="16" cy="12" r="1"/>',
+    'map-pin':    '<path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0Z"/><circle cx="12" cy="10" r="3"/>',
+    activity:     '<path d="M22 12h-4l-3 8-6-16-3 8H2"/>',
+    cpu:          '<rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2"/>',
+    server:       '<rect x="3" y="3" width="18" height="7" rx="2"/><rect x="3" y="14" width="18" height="7" rx="2"/><path d="M7 6.5h.01M7 17.5h.01"/>',
+    wifi:         '<path d="M5 12.5a10 10 0 0 1 14 0"/><path d="M8.5 16a5 5 0 0 1 7 0"/><path d="M2 9a15 15 0 0 1 20 0"/><circle cx="12" cy="19.5" r="1"/>',
+    zap:          '<path d="M13 2 3 14h9l-1 8 10-12h-9l1-8Z"/>',
+    mail:         '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m2 7 10 6 10-6"/>',
+    message:      '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z"/>',
+    calendar:     '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+    clock:        '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/>',
+    download:     '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>',
+    upload:       '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/>',
+    sliders:      '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3"/><path d="M1 14h6M9 8h6M17 16h6"/>',
+    user:         '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+    users:        '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+    bookmark:     '<path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2Z"/>',
+    star:         '<path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01Z"/>',
+    heart:        '<path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78Z"/>',
+    link:         '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+    'external-link': '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/>',
+    folder:       '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2Z"/>',
+    archive:      '<rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>',
+    package:      '<path d="M21 8 12 3 3 8v8l9 5 9-5Z"/><path d="m3 8 9 5 9-5"/>',
+    layers:       '<path d="m12 2 10 5-10 5L2 7Z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/>',
+    refresh:      '<path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.5 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.65 4.36A9 9 0 0 0 20.5 15"/>',
+    bell:         '<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>',
+    bug:          '<path d="m8 2 1.88 1.88"/><path d="M14.12 3.88 16 2"/><path d="M9 7.13v-1a3 3 0 0 1 6 0v1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3h12v3c0 3.3-2.7 6-6 6Z"/><path d="M12 20v-9"/><path d="M6.53 9C4.6 8.8 3 7.1 3 5"/><path d="M6 13H2"/><path d="M3 21c0-2.1 1.7-3.9 3.8-4"/><path d="M20.97 5c0 2.1-1.6 3.8-3.5 4"/><path d="M22 13h-4"/><path d="M17.2 17c2.1.1 3.8 1.9 3.8 4"/>',
+    code:         '<path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/>',
+    command:      '<path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3Z"/>',
+  };
+
+  function svgFor(name, cls = 'w-6 h-6') {
+    const path = (ICONS[name] || ICONS.box);
+    return '<svg class="' + cls + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + path + '</svg>';
+  }
+
+  /* ============================================================
+     State
+     ============================================================ */
+  const LS_SERVICES = 'server-hub:services'; // legacy key — migrated to server once
+  const LS_THEME    = 'server-hub:theme';        // legacy key — migrated once into HubSettings
+
+  let SERVICES = [];
+
+  // Serverless cold-start'ta ilk istek 500 dönebilir — 500/503/504'te sessizce
+  // tekrar dene (çok kısa gecikme). 401 asla retry edilmez (session sorunu).
+  async function fetchWithRetry(url, opts, retries = 2) {
+    for (let i = 0; i <= retries; i++) {
+      const r = await fetch(url, opts || { cache: 'no-store' });
+      if (r.status !== 500 && r.status !== 503 && r.status !== 504) return r;
+      if (i < retries) await new Promise(res => setTimeout(res, 700 * (i + 1)));
+    }
+    return r;
+  }
+
+  async function fetchServices() {
+    const r = await fetchWithRetry(API_SERVICES);
+    if (r.status === 401) {
+      // Session expired / invalid (ör. secret rotate) — temiz yeniden giriş.
+      try { localStorage.removeItem('server-hub:services'); } catch {}
+      window.location.href = '/login?expired=1';
+      throw new Error('session expired');
+    }
+    if (!r.ok) throw new Error('services api ' + r.status);
+    const d = await r.json();
+    return Array.isArray(d.services) ? d.services : [];
+  }
+
+  async function loadServices() {
+    SERVICES = await fetchServices();
+    renderGroups();
+    return SERVICES;
+  }
+
+  async function migrateLegacyServices() {
+    const legacyRaw = (() => {
+      try { return JSON.parse((window.localStorage || localStorage).getItem(LS_SERVICES) || '[]'); }
+      catch { return []; }
+    })();
+    const settingsServices = (window.HubSettings.get().services || []);
+    const candidates = [...legacyRaw, ...settingsServices]
+      .filter(s => s && s.name && s.url);
+    if (!candidates.length) return false;
+    let serverList;
+    try { serverList = await fetchServices(); } catch { serverList = []; }
+    const existing = new Set(serverList.map(s => s.url + '|' + s.name));
+    let pushed = 0, failed = 0;
+    for (const s of candidates) {
+      const key = s.url + '|' + s.name;
+      if (existing.has(key)) continue;
+      existing.add(key);
+      try {
+        const r = await fetch(API_SERVICES, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: s.name, url: s.url, desc: s.desc || '',
+            icon: s.icon || 'box', ping: s.ping !== false,
+            categoryOverride: s.categoryOverride || null,
+          }),
+        });
+        if (r.ok) pushed++; else failed++;
+      } catch { failed++; }
+    }
+    if (pushed > 0 && failed === 0) {
+      window.HubSettings.set({ services: [] });
+      try { (window.localStorage || localStorage).removeItem(LS_SERVICES); } catch {}
+    }
+    return pushed > 0;
+  }
+
+  async function apiJson(method, url, body) {
+    const opts = { method, cache: 'no-store' };
+    if (body !== undefined) {
+      opts.headers = { 'Content-Type': 'application/json' };
+      opts.body = JSON.stringify(body);
+    }
+    const r = await fetch(url, opts);
+    if (!r.ok) throw new Error('request failed (' + r.status + ')');
+    return r.json();
+  }
+
+  /* ============================================================
+     BOOKMARKS — loaded from the server (services.json) via the API
+     ============================================================ */
+  const API_BOOKMARKS = '/api/bookmarks';
+  let BOOKMARKS = [];
+
+  async function loadBookmarks() {
+    try {
+      const r = await fetchWithRetry(API_BOOKMARKS);
+      if (!r.ok) return;
+      const d = await r.json();
+      BOOKMARKS = Array.isArray(d.bookmarks) ? d.bookmarks : [];
+    } catch { BOOKMARKS = []; }
+    renderBookmarks();
+  }
+
+  function renderBookmarks() {
+    const box = document.getElementById('bookmarks');
+    if (!box) return;
+    box.innerHTML = '';
+    BOOKMARKS.forEach(b => {
+      const a = document.createElement('a');
+      a.target = '_blank'; a.rel = 'noopener noreferrer';
+      // grow: chips fill each row edge-to-edge (no ragged right gap);
+      // min-w-0 + truncate keeps long names on one line instead of wrapping.
+      a.className = 'glass px-3 py-2 rounded-lg flex items-center justify-center gap-2 grow min-w-0 text-sm hover:brightness-110 transition';
+      // Only assign href for http(s) URLs; anything else (javascript:, data:)
+      // is rendered non-clickable to prevent stored code execution.
+      a.href = /^https?:\/\//i.test(b.url) ? b.url : '#';
+      if (!/^https?:\/\//i.test(b.url)) a.classList.add('cursor-default', 'opacity-70');
+      const color = /^#[0-9a-fA-F]{6}$/.test(b.color || '') ? b.color : 'var(--accent)';
+      a.innerHTML = '<span class="w-2 h-2 rounded-full shrink-0" style="background:' + color + '"></span>'
+        + '<span class="truncate min-w-0">' + esc(b.name) + '</span>';
+      box.appendChild(a);
+    });
+  }
+
+  // Inline add-bookmark editor (hidden by default)
+  const bookmarkEditor = document.getElementById('bookmarks-editor');
+  const bookmarkName   = document.getElementById('bookmark-name');
+  const bookmarkUrl    = document.getElementById('bookmark-url');
+
+  function openBookmarkEditor() {
+    bookmarkName.value = '';
+    bookmarkUrl.value = '';
+    bookmarkEditor.classList.remove('hidden');
+    bookmarkName.focus();
+  }
+  function closeBookmarkEditor() {
+    bookmarkEditor.classList.add('hidden');
+  }
+  async function saveBookmark(e) {
+    e.preventDefault();
+    const name = bookmarkName.value.trim();
+    let url = bookmarkUrl.value.trim();
+    if (!name || !url) return;
+    if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+    try {
+      const r = await fetch(API_BOOKMARKS, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, url }),
+      });
+      if (!r.ok) { showToast('Failed to add bookmark'); return; }
+      const d = await r.json();
+      BOOKMARKS = Array.isArray(d.bookmarks) ? d.bookmarks : [];
+      renderBookmarks();
+      closeBookmarkEditor();
+    } catch {
+      showToast('Failed to add bookmark');
+    }
+  }
+  document.getElementById('bookmarks-add').addEventListener('click', openBookmarkEditor);
+  bookmarkEditor.addEventListener('submit', saveBookmark);
+  document.getElementById('bookmark-cancel').addEventListener('click', closeBookmarkEditor);
+
+  // Categorize at render time using categorize.js — memoized per SERVICES reference
+  let _catCache = null;
+  let _catCacheRef = null;
+  let _catCacheLen = -1;
+  function categorized() {
+    if (_catCache && _catCacheRef === SERVICES && _catCacheLen === SERVICES.length) return _catCache;
+    const out = SERVICES.map(s => {
+      const override = s.categoryOverride;
+      const auto = override ? { category: override, matched: '(override)' } : window.autoCategorize(s.name, s.url, s.desc);
+      return { ...s, category: auto.category, matched: auto.matched };
+    });
+    _catCache = out; _catCacheRef = SERVICES; _catCacheLen = SERVICES.length;
+    return out;
+  }
+
+  const groupsEl    = document.getElementById('groups');
+  const skeletonsEl = document.getElementById('skeletons');
+  const emptyEl     = document.getElementById('empty');
+  const emptyTerm   = document.getElementById('empty-term');
+  const searchInput = document.getElementById('search');
+
+  const SEARCH_PROVIDERS = {
+    google:  'https://www.google.com/search?q=',
+    ddg:     'https://duckduckgo.com/?q=',
+    bing:    'https://www.bing.com/search?q=',
+    startpage: 'https://www.startpage.com/sp/search?query=',
+    searxng: null,
+  };
+  function webSearch(q) {
+    const s = window.HubSettings.get().search;
+    let url;
+    if (s.provider === 'searxng' && s.searxngUrl) {
+      url = s.searxngUrl.replace(/\/$/, '') + '/search?q=' + encodeURIComponent(q);
+    } else {
+      url = (SEARCH_PROVIDERS[s.provider] || SEARCH_PROVIDERS.google) + encodeURIComponent(q);
+    }
+    window.open(url, '_blank', 'noopener');
+  }
+
+  function renderGroups() {
+    const items = categorized();
+    const grouped = items.reduce((acc, s, i) => {
+      (acc[s.category] = acc[s.category] || []).push({ ...s, idx: i });
+      return acc;
+    }, {});
+    const order = Object.keys(grouped).sort((a, b) => grouped[b].length - grouped[a].length || a.localeCompare(b));
+
+    // Adaptive layout: a category with many apps spans a full row with a
+    // multi-column (horizontal) grid; categories with few apps sit side by
+    // side as columns with their apps listed vertically underneath.
+    const BIG_ROW = 4;
+    let html = '<div class="flex flex-wrap items-start gap-x-6 gap-y-8" id="groups-cols">';
+    for (const cat of order) {
+      const list = grouped[cat];
+      const big = list.length >= BIG_ROW;
+      html += '<section class="group' + (big ? ' w-full' : ' flex-1 min-w-[240px]') + '" data-category="' + esc(cat) + '">'
+        + '<h2 class="group-header text-xs font-semibold uppercase">' + esc(cat)
+        + ' <span class="text-[color:var(--fg-muted)]/60 font-normal">· ' + list.length + '</span></h2>'
+        + '<div class="grid mt-2' + (big ? ' grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3' : ' grid-cols-1 gap-3') + '">';
+      for (const s of list) {
+        html += renderCard(s);
+      }
+      html += '</div></section>';
+    }
+    html += '</div>';
+    groupsEl.innerHTML = html;
+    skeletonsEl.classList.add('hidden');
+
+    // Reveal: on mobile/touch instant (no staggered timers), on desktop staggered but cheap
+    const _isCoarse = window.matchMedia('(max-width: 768px)').matches
+      || window.matchMedia('(pointer: coarse)').matches
+      || window.matchMedia('(hover: none)').matches
+      || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (_isCoarse) {
+      document.querySelectorAll('.card.reveal').forEach(el => el.classList.add('shown'));
+    } else {
+      requestAnimationFrame(() => {
+        const cards = document.querySelectorAll('.card.reveal');
+        // Use rAF + micro-stagger via timeout but batch to avoid N timers on huge lists
+        cards.forEach((el, i) => {
+          if (i < 12) setTimeout(() => el.classList.add('shown'), i * 22);
+          else el.classList.add('shown');
+        });
+      });
+    }
+
+    // Status pings: only when feature enabled; defer off-screen via IntersectionObserver
+    const _pingsEnabled = window.HubSettings.get().features.statusPings !== false;
+    if (_pingsEnabled) {
+      const _cards = document.querySelectorAll('[data-ping-url]');
+      const _obs = (() => {
+        if (!('IntersectionObserver' in window)) return null;
+        try {
+          return new IntersectionObserver((entries, obs) => {
+            entries.forEach(entry => {
+              if (entry.isIntersecting) {
+                obs.unobserve(entry.target);
+                pingService(entry.target);
+              }
+            });
+          }, { rootMargin: '240px' });
+        } catch { return null; }
+      })();
+      if (_obs) {
+        _cards.forEach(el => { if (el.dataset.pingUrl) _obs.observe(el); });
+        // Fallback: any remaining not observed after 4s (observer edge cases) — ping
+        setTimeout(() => { _cards.forEach(el => { try{ _obs.unobserve(el);}catch{}; if (el.isConnected && el.querySelector('[data-status].status-wait, [data-status].status-idle')) pingService(el); }); }, 4200);
+      } else {
+        // No observer: stagger pings to avoid network burst (6 at a time)
+        let _idx = 0;
+        function _pingNext(){
+          const batch = Array.from(_cards).slice(_idx, _idx + 6);
+          batch.forEach(el => pingService(el));
+          _idx += 6;
+          if (_idx < _cards.length) setTimeout(_pingNext, 120);
+        }
+        _pingNext();
+      }
+    }
+
+    // Re-apply current filter
+    filter(searchInput.value);
+  }
+
+  const ICON_PENCIL = '<path d="M4 20h4L19.5 8.5a2.1 2.1 0 0 0-3-3L5 17Z"/><path d="m13.5 6.5 3 3"/>';
+  const ICON_TRASH  = '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/><path d="M10 11v5M14 11v5"/>';
+
+  function renderCard(s) {
+    const target = /^https?:\/\//i.test(s.url) ? s.url : 'https://' + s.url;
+    const actions = s.id
+      ? '<span class="card-actions flex gap-0.5 shrink-0 mt-1">'
+          + '<button type="button" class="card-action" data-edit="' + esc(s.id) + '" title="Edit" aria-label="Edit ' + esc(s.name) + '">'
+          + '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + ICON_PENCIL + '</svg></button>'
+          + '<button type="button" class="card-action" data-del="' + esc(s.id) + '" title="Delete" aria-label="Delete ' + esc(s.name) + '">'
+          + '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + ICON_TRASH + '</svg></button>'
+        + '</span>'
+      : '';
+    return '<a href="' + esc(target) + '" target="_blank" rel="noopener noreferrer" '
+      + 'class="card reveal glass flex items-start gap-2 p-3 focus-ring cursor-pointer relative overflow-hidden" '
+      + 'data-name="' + esc(s.name.toLowerCase()) + '" data-desc="' + esc((s.desc || '').toLowerCase()) + '" '
+      + 'data-category="' + esc(s.category) + '" data-ping-url="' + (s.ping !== false ? esc(s.url) : '') + '" '
+      + 'data-id="' + esc(s.id || '') + '">'
+      + '<span class="accent-bar absolute left-0 top-0 h-full w-[3px] opacity-70" aria-hidden="true"></span>'
+      + '<span class="shrink-0 mt-0 text-[color:var(--fg)]">' + svgFor(s.icon) + '</span>'
+      + '<span class="min-w-0 flex-1">'
+      + '<span class="flex items-center gap-2">'
+      + '<span class="text-sm font-medium text-[color:var(--fg)] truncate">' + esc(s.name) + '</span>'
+      + '<span class="status-dot status-idle" data-status role="img" aria-label="checking status"></span>'
+      + '</span>'
+      + '<span class="block text-xs text-[color:var(--fg-muted)] mt-0.5 truncate">' + esc(s.desc || '') + '</span>'
+      + '<span class="block text-[11px] text-[color:var(--fg-muted)]/70 font-mono mt-0.5 truncate">' + esc(hostOf(s.url)) + '</span>'
+      + '</span>'
+      + actions
+      + '</a>';
+  }
+
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+  let toastT;
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.remove('hidden');
+    clearTimeout(toastT);
+    toastT = setTimeout(() => t.classList.add('hidden'), 2000);
+  }
+  window.__hubToast = showToast;
+
+  function hostOf(url) {
+    if (!url) return '';
+    try { return new URL(url.startsWith('http') ? url : 'https://' + url).host; } catch { return url; }
+  }
+
+  /* ============================================================
+     Add-service form
+     ============================================================ */
+  const addToggle = document.getElementById('add-toggle');
+  const addForm    = document.getElementById('add-form');
+  const addName    = document.getElementById('add-name');
+  const addUrl      = document.getElementById('add-url');
+  const addDesc     = document.getElementById('add-desc');
+  const addPreview  = document.getElementById('add-preview');
+  const addToggleLabel = document.getElementById('add-toggle-label');
+
+  function schemeOf(v) {
+    const m = /^https?:\/\//.exec(v);
+    return m ? m[0] : null;
+  }
+
+  function openAddModal() {
+    document.getElementById('add-modal').classList.remove('hidden');
+    addToggle.setAttribute('aria-expanded', 'true');
+    addToggleLabel.textContent = 'Close';
+    addForm.classList.remove('hidden');
+    addName.focus();
+  }
+
+  function closeAddModal() {
+    document.getElementById('add-modal').classList.add('hidden');
+    addToggle.setAttribute('aria-expanded', 'false');
+    addToggleLabel.textContent = '+ Add';
+  }
+
+  addToggle.addEventListener('click', () => {
+    if (document.getElementById('add-modal').classList.contains('hidden')) openAddModal();
+    else closeAddModal();
+  });
+
+  addUrl.addEventListener('input', () => {
+    const scheme = schemeOf(addUrl.value);
+    if (scheme) {
+      document.getElementById('add-scheme').value = scheme;
+      addUrl.value = addUrl.value.slice(scheme.length);
+    }
+  });
+
+  document.getElementById('edit-url').addEventListener('input', () => {
+    const el = document.getElementById('edit-url');
+    const scheme = schemeOf(el.value);
+    if (scheme) {
+      document.getElementById('edit-scheme').value = scheme;
+      el.value = el.value.slice(scheme.length);
+    }
+  });
+
+  async function addService(entry) {
+    const data = await apiJson('POST', API_SERVICES, entry);
+    SERVICES = Array.isArray(data.services) ? data.services : SERVICES;
+    renderGroups();
+  }
+
+  addForm.addEventListener('submit', async e => {
+    e.preventDefault();
+    const name = addName.value.trim();
+    const rawHost = addUrl.value.trim();
+    let url = (document.getElementById('add-scheme').value + rawHost).trim();
+    const dd = window.HubSettings.get().defaultDomain;
+    if (dd && rawHost && !rawHost.includes('.') && !rawHost.includes(':')) {
+      url = (document.getElementById('add-scheme').value + rawHost + '.' + dd).trim();
+      addUrl.value = rawHost + '.' + dd;
+    }
+    const desc = addDesc.value.trim();
+    if (!name || !url) return;
+    const result = window.autoCategorize(name, url, desc);
+    const icon = pickIcon(result.category, name.toLowerCase());
+    try {
+      await addService({ name, url, desc, icon, ping: true, categoryOverride: result.category });
+      addName.value = ''; addUrl.value = ''; addDesc.value = '';
+      addPreview.textContent = '✓ Added to ' + result.category;
+      setTimeout(() => addPreview.textContent = '', 2500);
+      closeAddModal();
+    } catch (err) {
+      addPreview.textContent = '✗ ' + err.message;
+      setTimeout(() => addPreview.textContent = '', 2500);
+      showToast('Failed to add link');
+    }
+  });
+
+  function pickIcon(category, name) {
+    const ic = {
+      Monitoring: 'chart', Security: 'shield', Network: 'globe', Media: 'film',
+      Productivity: 'note', Files: 'file', Dev: 'git', Communication: 'broadcast',
+      Home: 'home', Finance: 'shopping', AI: 'sparkles', Search: 'pulse',
+      Database: 'database', Other: 'box',
+    };
+    if (/git|coder|code-server/.test(name)) return 'git';
+    if (/music|navidrome/.test(name)) return 'music';
+    if (/torrent|deluge|sab/.test(name)) return 'box';
+    return ic[category] || 'box';
+  }
+
+  /* ============================================================
+     Remove (server-persisted)
+     ============================================================ */
+  async function remove(id) {
+    if (!id) return;
+    const svc = SERVICES.find(s => s.id === id);
+    const name = svc ? svc.name : 'this link';
+    if (!confirm('Delete "' + name + '"?')) return;
+    try {
+      const data = await apiJson('DELETE', API_SERVICES + '/' + encodeURIComponent(id));
+      SERVICES = Array.isArray(data.services) ? data.services : SERVICES;
+      renderGroups();
+      showToast('Link deleted');
+    } catch (err) {
+      showToast('Failed to delete link');
+    }
+  }
+
+  /* ============================================================
+     Edit modal (hover edit button)
+     ============================================================ */
+  let editingId = null;
+  let selectedIcon = 'box';
+
+  const editCats = ['auto'].concat(Object.keys(window.KEYWORD_RULES || {}).concat(['Other']));
+  (function () {
+    const sel = document.getElementById('edit-cat');
+    if (!sel) return;
+    sel.innerHTML = editCats.map(c =>
+      '<option value="' + esc(c) + '"' + (c === 'auto' ? ' selected' : '') + '>' + esc(c) + '</option>'
+    ).join('');
+  })();
+
+  function renderIconPicker(current) {
+    selectedIcon = ICONS[current] ? current : 'box';
+    const grid = document.getElementById('edit-icons');
+    grid.innerHTML = '';
+    for (const key of Object.keys(ICONS)) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'icon-opt focus-ring' + (key === selectedIcon ? ' selected' : '');
+      b.dataset.icon = key;
+      b.title = key;
+      b.innerHTML = svgFor(key, 'w-5 h-5');
+      b.addEventListener('click', () => {
+        selectedIcon = key;
+        grid.querySelectorAll('.icon-opt').forEach(x => x.classList.toggle('selected', x === b));
+      });
+      grid.appendChild(b);
+    }
+  }
+
+  function openEditModal(id) {
+    const s = SERVICES.find(x => x.id === id);
+    if (!s) return;
+    editingId = id;
+    document.getElementById('edit-name').value = s.name;
+    const scheme = schemeOf(s.url) || 'https://';
+    document.getElementById('edit-scheme').value = scheme;
+    document.getElementById('edit-url').value = s.url.slice(scheme.length);
+    document.getElementById('edit-desc').value = s.desc || '';
+    renderIconPicker(s.icon);
+    document.getElementById('edit-cat').value = s.categoryOverride || 'auto';
+    document.getElementById('edit-modal').classList.remove('hidden');
+    document.getElementById('edit-name').focus();
+  }
+
+  function closeEditModal() {
+    editingId = null;
+    document.getElementById('edit-modal').classList.add('hidden');
+  }
+
+  async function saveEditModal() {
+    if (!editingId) return;
+    const cur = SERVICES.find(s => s.id === editingId);
+    const name = document.getElementById('edit-name').value.trim();
+    const url  = (document.getElementById('edit-scheme').value + document.getElementById('edit-url').value.trim()).trim();
+    const desc = document.getElementById('edit-desc').value.trim();
+    const cat  = document.getElementById('edit-cat').value;
+    if (!name || !url) { showToast('Name and URL are required'); return; }
+    try {
+      const data = await apiJson('PUT', API_SERVICES + '/' + encodeURIComponent(editingId), {
+        name, url, desc, icon: selectedIcon,
+        ping: cur ? cur.ping !== false : true,
+        categoryOverride: cat === 'auto' ? null : cat,
+      });
+      SERVICES = Array.isArray(data.services) ? data.services : SERVICES;
+      closeEditModal();
+      renderGroups();
+      showToast('Link updated');
+    } catch (err) {
+      showToast('Failed to save link');
+    }
+  }
+
+  document.getElementById('edit-save').addEventListener('click', saveEditModal);
+  document.getElementById('edit-cancel').addEventListener('click', closeEditModal);
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && !document.getElementById('edit-modal').classList.contains('hidden')) {
+      closeEditModal();
+    }
+  });
+
+  /* ============================================================
+     Search filter
+     ============================================================ */
+  let _searchDebounce = 0;
+  searchInput.addEventListener('input', e => {
+    clearTimeout(_searchDebounce);
+    const v = e.target.value;
+    // immediate rAF for empty query (clear), debounce for typing
+    if (!v.trim()) { scheduleFilter(v); }
+    else { _searchDebounce = setTimeout(() => scheduleFilter(v), 80); }
+  }, { passive: true });
+
+  document.addEventListener('keydown', e => {
+    const el = document.activeElement;
+    const typing = el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA'
+      || el.tagName === 'SELECT' || el.isContentEditable);
+    if (e.key === '/' && !typing && window.HubSettings.get().features.search !== false) {
+      e.preventDefault(); openSearch();
+    }
+    if (e.key === 'f' && !typing && window.HubSettings.get().features.search !== false
+        && searchModal.classList.contains('hidden')) {
+      e.preventDefault(); openSearch();
+    }
+    if (e.key === 'Escape' && document.activeElement === searchInput) {
+      searchInput.value = ''; filter(''); searchInput.blur();
+    }
+  });
+
+  const searchModal = document.getElementById('search-modal');
+  const searchModalInput = document.getElementById('search-modal-input');
+  const searchSuggestions = document.getElementById('search-suggestions');
+  let selectedSuggestion = -1;
+
+  function openSearch() { searchModal.classList.remove('hidden'); searchModalInput.value = ''; renderSearchSuggestions(''); searchModalInput.focus(); }
+  function closeSearch() { searchModal.classList.add('hidden'); searchSuggestions.innerHTML = ''; selectedSuggestion = -1; }
+  let _suggestDebounce = 0;
+  function renderSearchSuggestions(q) {
+    const items = categorized();
+    const ql = q.toLowerCase();
+    const matches = ql ? items.filter(s => (s.name + ' ' + (s.desc || '')).toLowerCase().includes(ql)).slice(0, 8) : items.slice(0, 8);
+    searchSuggestions.innerHTML = '';
+    selectedSuggestion = -1;
+    const frag = document.createDocumentFragment();
+    matches.forEach(s => {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'flex items-center gap-2 text-left px-3 py-2 rounded-lg hover:bg-[color:var(--surface-hi)] transition text-sm border border-transparent';
+      row.setAttribute('aria-selected', 'false');
+      row.innerHTML = '<span class="shrink-0">' + svgFor(s.icon) + '</span><span class="min-w-0 flex-1 truncate">' + esc(s.name) + '</span><span class="text-[10px] text-[color:var(--fg-muted)] truncate">' + esc(s.category) + '</span>';
+      row.addEventListener('click', () => { window.open(s.url.startsWith('http') ? s.url : 'https://' + s.url, '_blank', 'noopener'); closeSearch(); });
+      frag.appendChild(row);
+    });
+    searchSuggestions.appendChild(frag);
+  }
+  function scheduleSuggestions(q){
+    clearTimeout(_suggestDebounce);
+    _suggestDebounce = setTimeout(() => renderSearchSuggestions(q), 90);
+  }
+  function openSuggestion(row) {
+    if (!row) return false;
+    row.click();
+    return true;
+  }
+  function highlightSuggestion(i) {
+    const rows = Array.from(searchSuggestions.querySelectorAll('button'));
+    selectedSuggestion = i;
+    rows.forEach((r, idx) => {
+      const on = idx === i;
+      r.setAttribute('aria-selected', String(on));
+      r.classList.toggle('suggestion-selected', on);
+    });
+    if (rows[i]) rows[i].scrollIntoView({ block: 'nearest' });
+  }
+  searchModalInput.addEventListener('input', () => scheduleSuggestions(searchModalInput.value), { passive: true });
+  searchModalInput.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeSearch();
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const rows = searchSuggestions.querySelectorAll('button');
+      if (!rows.length) return;
+      const delta = e.key === 'ArrowDown' ? 1 : -1;
+      highlightSuggestion(Math.min(rows.length - 1, Math.max(0, selectedSuggestion + delta)));
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const rows = searchSuggestions.querySelectorAll('button');
+      // Open the highlighted service if one is selected; otherwise web search.
+      if (selectedSuggestion >= 0 && rows[selectedSuggestion]) {
+        openSuggestion(rows[selectedSuggestion]);
+        return;
+      }
+      const q = searchModalInput.value.trim();
+      if (!q) return;
+      closeSearch();
+      webSearch(q);
+    }
+  });
+  searchModal.addEventListener('keydown', e => { if (e.key === 'Escape') closeSearch(); });
+  document.getElementById('search').addEventListener('click', openSearch);
+
+  let _filterRaf = 0;
+  let _filterPending = '';
+  function _filterNow(q) {
+    q = q.trim().toLowerCase();
+    const groups = document.querySelectorAll('.group');
+    let visible = 0;
+    for (let gi = 0; gi < groups.length; gi++) {
+      const group = groups[gi];
+      const cards = group.querySelectorAll('.card');
+      let gv = 0;
+      for (let ci = 0; ci < cards.length; ci++) {
+        const card = cards[ci];
+        const match = !q || card.dataset.name.includes(q) || card.dataset.desc.includes(q);
+        // Avoid layout thrash: only touch display when it actually changes
+        const shouldHide = !match;
+        const isHidden = card.style.display === 'none';
+        if (shouldHide !== isHidden) card.style.display = shouldHide ? 'none' : '';
+        if (match) gv++;
+      }
+      const groupHidden = group.style.display === 'none';
+      const shouldGroupHide = gv === 0;
+      if (shouldGroupHide !== groupHidden) group.style.display = shouldGroupHide ? 'none' : '';
+      visible += gv;
+    }
+    emptyEl.classList.toggle('hidden', visible !== 0);
+    if (visible === 0) emptyTerm.textContent = q;
+  }
+  function filter(q) { _filterNow(q); }
+  function scheduleFilter(q) {
+    _filterPending = q;
+    if (_filterRaf) return;
+    _filterRaf = requestAnimationFrame(() => { _filterRaf = 0; _filterNow(_filterPending); });
+  }
+
+  /* ============================================================
+     Status ping
+     ============================================================ */
+  let _pingActive = 0;
+  const _pingQueue = [];
+  const _PING_CONCURRENCY = 6;
+  function _runPing(card) {
+    const url = card.dataset.pingUrl;
+    if (!url) { _pingActive--; if (_pingQueue.length) _runPing(_pingQueue.shift()); return; }
+    const dot = card.querySelector('[data-status]');
+    if (!dot) { _pingActive--; if (_pingQueue.length) _runPing(_pingQueue.shift()); return; }
+    const ctrl = new AbortController();
+    const tmo  = setTimeout(() => ctrl.abort(), 5500);
+    dot.classList.remove('status-idle'); dot.classList.add('status-wait');
+    dot.setAttribute('aria-label', 'checking ' + hostOf(url));
+    // Defer fetch to idle on mobile to avoid scroll jank
+    const doFetch = () => fetch(url, { mode: 'no-cors', signal: ctrl.signal, cache: 'no-store', redirect: 'follow' })
+      .then(() => mark(dot, true, hostOf(url)))
+      .catch(err => mark(dot, !(err instanceof DOMException && err.name === 'AbortError') ? false : 'timeout', hostOf(url)))
+      .finally(() => { clearTimeout(tmo); _pingActive--; if (_pingQueue.length) _runPing(_pingQueue.shift()); });
+    if ('requestIdleCallback' in window) requestIdleCallback(doFetch, { timeout: 1200 });
+    else setTimeout(doFetch, 0);
+  }
+  function pingService(card) {
+    if (!card || !card.dataset.pingUrl) return;
+    if (document.hidden) { // defer while tab hidden
+      const onVis = () => { document.removeEventListener('visibilitychange', onVis); pingService(card); };
+      document.addEventListener('visibilitychange', onVis, { once: true });
+      return;
+    }
+    _pingActive++;
+    if (_pingActive > _PING_CONCURRENCY) { _pingActive--; _pingQueue.push(card); return; }
+    _runPing(card);
+  }
+  function mark(dot, up, host) {
+    dot.classList.remove('status-wait');
+    if (up === true)            { dot.classList.add('status-up');   dot.setAttribute('aria-label', host + ' is up'); }
+    else if (up === 'timeout')  { dot.classList.add('status-idle'); dot.setAttribute('aria-label', host + ' check timed out'); }
+    else                        { dot.classList.add('status-down'); dot.setAttribute('aria-label', host + ' is down'); }
+  }
+
+  /* ============================================================
+     Clock + greeting
+     ============================================================ */
+  const clockEl = document.getElementById('clock');
+  const dateEl  = document.getElementById('date');
+  const greetEl = document.getElementById('greeting');
+  const pad = n => String(n).padStart(2, '0');
+  let _lastDateStr = '', _lastGreetKey = '', _lastHour = -1;
+  let _fmtLong = null, _fmtShort = null;
+  try {
+    _fmtLong  = new Intl.DateTimeFormat(undefined, { weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' });
+    _fmtShort = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
+  } catch {}
+  function _formatLong(d){ return _fmtLong ? _fmtLong.format(d) : d.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' }); }
+  function _formatShort(d){ return _fmtShort ? _fmtShort.format(d) : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); }
+  function tick() {
+    const d = new Date();
+    clockEl.textContent = pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+    const dayKey = d.getFullYear() + '-' + d.getMonth() + '-' + d.getDate();
+    if (dayKey !== _lastDateStr) { _lastDateStr = dayKey; dateEl.textContent = _formatLong(d); }
+    const h = d.getHours();
+    const greetKey = dayKey + '-' + h + '-' + (greetEl.dataset.userName || '');
+    if (greetKey !== _lastGreetKey) {
+      _lastGreetKey = greetKey; _lastHour = h;
+      const part = h < 5 ? 'Good night' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+      greetEl.textContent = part + (greetEl.dataset.userName ? ', ' + greetEl.dataset.userName : '') + ' — ' + _formatShort(d);
+    }
+  }
+  tick();
+  let _tickTimer = setInterval(tick, 1000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { clearInterval(_tickTimer); _tickTimer = null; }
+    else if (!_tickTimer) { tick(); _tickTimer = setInterval(tick, 1000); }
+  }, { passive: true });
+
+  /* ============================================================
+     System stats — wire to /api/stats { host, cpu, mem, disk }
+     ============================================================ */
+  const STAT_ENDPOINT = '/api/stats';
+  const gridEl = document.getElementById('stats-grid');
+  const STAT_GRID_HTML = gridEl.innerHTML;
+  const hostEl = document.getElementById('stats-host');
+
+  function setBar(bar, val, label) {
+    if (val == null || isNaN(val)) { bar.style.width = '0%'; label.textContent = '—'; return; }
+    const v = Math.max(0, Math.min(100, val));
+    bar.style.width = v.toFixed(0) + '%';
+    bar.style.background = v >= 90 ? 'var(--red)' : v >= 75 ? 'var(--amber)' : 'var(--accent)';
+    label.textContent = v.toFixed(0) + '%';
+  }
+  async function renderSingleHostFallback() {
+    try {
+      gridEl.className = 'grid grid-cols-3 gap-3 sm:gap-4';
+      gridEl.innerHTML = STAT_GRID_HTML;
+      const cpuBar = document.getElementById('stat-cpu-bar'); const cpuVal = document.getElementById('stat-cpu-val');
+      const memBar = document.getElementById('stat-mem-bar'); const memVal = document.getElementById('stat-mem-val');
+      const diskBar = document.getElementById('stat-disk-bar'); const diskVal = document.getElementById('stat-disk-val');
+      const r = await fetch(STAT_ENDPOINT, { cache: 'no-store' });
+      if (!r.ok) return;
+      const d = await r.json();
+      if (d.host) hostEl.textContent = d.host;
+      setBar(cpuBar, d.cpu, cpuVal);
+      setBar(memBar, d.mem, memVal);
+      setBar(diskBar, d.disk, diskVal);
+    } catch {}
+  }
+  async function pollStats() {
+    if (document.hidden) return;
+    try {
+      const r = await fetchWithRetry('/api/beszel', undefined, 1);
+      if (r.ok) {
+        const d = await r.json();
+        if (d.enabled) {
+          if (d.error) { renderSingleHostFallback(); return; }
+          renderBeszel(d.systems);
+          return;
+        }
+      }
+    } catch {}
+    renderSingleHostFallback();
+  }
+  function formatUptime(sec) {
+    if (sec == null || isNaN(sec) || sec < 1) return '';
+    if (sec >= 86400) { const d = Math.floor(sec / 86400); const h = Math.floor((sec % 86400) / 3600); return h ? d + 'd ' + h + 'h' : d + 'd'; }
+    if (sec >= 3600) { const h = Math.floor(sec / 3600); const m = Math.floor((sec % 3600) / 60); return m ? h + 'h ' + m + 'm' : h + 'h'; }
+    if (sec >= 60) { const m = Math.floor(sec / 60); const s = sec % 60; return s ? m + 'm ' + s + 's' : m + 'm'; }
+    return Math.floor(sec) + 's';
+  }
+  function renderBeszel(systems) {
+    gridEl.className = 'grid grid-cols-2 gap-3 sm:gap-4';
+    gridEl.innerHTML = '';
+    const showUptime = window.HubSettings.get().features.beszelUptime !== false;
+    systems.forEach(s => {
+      const up = formatUptime(s.uptime);
+      const row = document.createElement('div');
+      row.className = 'space-y-1';
+      row.innerHTML =
+        '<div class="flex items-baseline justify-between gap-2">' +
+          '<span class="text-xs text-[color:var(--fg-muted)] truncate" title="' + esc(s.host || '') + '">' + esc(s.name) + '</span>' +
+          '<span class="font-mono text-[10px] tabular-nums text-[color:var(--fg-muted)]">' + esc(s.status) + (showUptime && up ? ' · ' + up : '') + '</span>' +
+        '</div>' +
+        barRow('CPU', s.cpu) + barRow('Mem', s.mem) + barRow('Disk', s.disk);
+      gridEl.appendChild(row);
+    });
+  }
+  function barRow(label, val) {
+    const pct = (val == null || isNaN(val)) ? '—' : Math.max(0, Math.min(100, val)).toFixed(0) + '%';
+    const w = (val == null || isNaN(val)) ? '0%' : Math.max(0, Math.min(100, val)).toFixed(0) + '%';
+    return '<div class="flex items-center gap-2"><span class="text-[10px] text-[color:var(--fg-muted)] w-8">' + label + '</span>' +
+      '<div class="flex-1 h-1.5 bg-[color:var(--surface-hi)] rounded-full overflow-hidden"><div class="h-full" style="width:' + w + ';background:' + (val >= 90 ? 'var(--red)' : val >= 75 ? 'var(--amber)' : 'var(--accent)') + '"></div></div>' +
+      '<span class="font-mono text-[10px] tabular-nums w-8 text-right">' + pct + '</span></div>';
+  }
+  pollStats();
+  let _statsTimer = setInterval(pollStats, 15000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { clearInterval(_statsTimer); _statsTimer = null; }
+    else if (!_statsTimer) { pollStats(); _statsTimer = setInterval(pollStats, 15000); }
+  }, { passive: true });
+
+  /* ============================================================
+     Theme — auto / light / dark, persisted
+     ============================================================ */
+  const themeBtn  = document.getElementById('theme-toggle');
+  const themeIcon = document.getElementById('theme-icon');
+  const themeChip = document.getElementById('theme-chip');
+
+  const THEME_ICON_AUTO  = '<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18Z"/>';
+  const THEME_ICON_LIGHT = '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>';
+  const THEME_ICON_DARK  = '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/>';
+
+  function preferredDark() { return window.matchMedia('(prefers-color-scheme: dark)').matches; }
+
+  function applyTheme(mode) {
+    const dark = mode === 'dark' || (mode === 'auto' && preferredDark());
+    document.documentElement.classList.toggle('light', !dark);
+    document.documentElement.classList.toggle('dark', dark);
+    themeIcon.innerHTML = dark ? THEME_ICON_DARK : THEME_ICON_LIGHT;
+    themeBtn.setAttribute('aria-label', 'Theme: ' + mode + ' (click to toggle)');
+    themeBtn.setAttribute('title', 'Theme: ' + mode + ' — click to cycle');
+    themeChip.textContent = 'theme: ' + mode;
+  }
+  function wallpaperIsCustom(s) {
+    return s && s.wallpaper && s.wallpaper.mode === 'custom';
+  }
+  function syncThemeToggle() {
+    const on = wallpaperIsCustom(window.HubSettings.get());
+    themeBtn.disabled = on;
+    themeBtn.classList.toggle('theme-btn-disabled', on);
+  }
+  function cycleTheme() {
+    if (wallpaperIsCustom(window.HubSettings.get())) return;
+    const cur = window.HubSettings.get().theme;
+    const next = cur === 'auto' ? 'light' : cur === 'light' ? 'dark' : 'auto';
+    window.HubSettings.set({ theme: next });
+    applyTheme(next);
+  }
+  themeBtn.addEventListener('click', cycleTheme);
+
+  // Apply persisted settings on boot + subscribe to live changes (from settings.html in another tab)
+  const bootSettings = window.HubSettings.get();
+  // One-time migration of legacy theme key
+  const legacyTheme = (() => { try { return localStorage.getItem(LS_THEME); } catch { return null; } })();
+  const curSettingsKey = (() => { try { return localStorage.getItem(window.HubSettings.KEY); } catch { return null; } })();
+  if (legacyTheme && !curSettingsKey) {
+    window.HubSettings.set({ theme: legacyTheme });
+  } else if (legacyTheme) {
+    try { localStorage.removeItem(LS_THEME); } catch {}
+  }
+  const effectiveSettings = window.HubSettings.get();
+  window.HubSettings.apply(effectiveSettings);
+  applyTheme(effectiveSettings.theme);
+  window.HubSettings.applyWallpaper(window.HubSettings.get());
+  syncThemeToggle();
+  window.HubSettings.subscribe(s => { applyTheme(s.theme); window.HubSettings.apply(s); window.HubSettings.applyWallpaper(s); syncThemeToggle(); });
+
+  // Multi-user: pull settings from the server (Supabase) so each user gets
+  // their own layout/personalization across devices. Server wins; local is cache.
+  window.HubSettings.loadFromServer().then(remote => {
+    if (remote) {
+      window.HubSettings.apply(remote);
+      applyTheme(remote.theme);
+      window.HubSettings.applyWallpaper(remote);
+      syncThemeToggle();
+    }
+  });
+
+  // Kullanıcıya özel hata loglama: yakalanmamış istisnalar Supabase user_logs'a
+  // gider (yalnızca multi-user modda; hata loglama asla uygulamayı bozmaz).
+  window.addEventListener('error', ev => {
+    try {
+      fetch('/api/logs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          level: 'ERROR',
+          source: 'frontend',
+          message: String(ev.message || 'unknown error').slice(0, 500),
+          details: { file: ev.filename, line: ev.lineno, col: ev.colno },
+        }),
+      }).catch(() => {});
+    } catch {}
+  });
+  window.addEventListener('unhandledrejection', ev => {
+    try {
+      const reason = ev.reason;
+      fetch('/api/logs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          level: 'ERROR',
+          source: 'frontend',
+          message: String((reason && reason.message) || reason || 'unhandled rejection').slice(0, 500),
+          details: { promise: true },
+        }),
+      }).catch(() => {});
+    } catch {}
+  });
+
+  // FAB: opens the add-service modal
+  document.getElementById('fab-add').addEventListener('click', () => {
+    openAddModal();
+  });
+
+  // Re-render when settings change in another tab (services are server-side now)
+  window.addEventListener('storage', async e => {
+    if (e.key === window.HubSettings.KEY) {
+      try { SERVICES = await fetchServices(); } catch {}
+      renderGroups();
+    }
+  });
+
+  // React to OS theme change when in auto mode
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    if (window.HubSettings.get().theme === 'auto') applyTheme('auto');
+  });
+
+  /* ============================================================
+     Cloudflare Access — show signed-in user chip if backend exposes /api/me
+     (See SETUP.md. CF Access protects at the edge; this is UX-only.)
+     ============================================================ */
+  const cfChip = document.getElementById('cf-chip');
+  const logoutBtn = document.getElementById('logout-btn');
+  logoutBtn.addEventListener('click', () => { window.location.href = '/logout'; });
+  async function pollIdentity() {
+    try {
+      const r = await fetch('/api/me', { cache: 'no-store' });
+      if (!r.ok) return;
+      const d = await r.json();
+      if (d && d.email) {
+        cfChip.textContent = '👤 ' + d.email;
+        cfChip.classList.remove('hidden');
+        logoutBtn.classList.remove('hidden');
+      }
+    } catch {}
+  }
+  pollIdentity();
+
+  /* ============================================================
+     Expose for tests (tests.html loads index.html in iframe)
+     ============================================================ */
+  // Delegated handlers for card edit/delete buttons (avoids inline onclick
+  // handlers, which are a stored-XSS vector via entity-escaped ids).
+  groupsEl.addEventListener('click', e => {
+    const btn = e.target.closest('[data-edit],[data-del]');
+    if (!btn) return;
+    e.preventDefault(); e.stopPropagation();
+    if (btn.hasAttribute('data-edit')) openEditModal(btn.getAttribute('data-edit'));
+    else if (btn.hasAttribute('data-del')) remove(btn.getAttribute('data-del'));
+  });
+  window.__HUB__ = {
+    SERVICES, SERVICES_DEFAULT,
+    renderGroups, filter, applyTheme, cycleTheme, remove,
+    edit: openEditModal, closeEdit: closeEditModal,
+    saveEdit: saveEditModal, openIconPicker: renderIconPicker,
+    openAdd: openAddModal, closeAdd: closeAddModal,
+    loadServices, reloadServices: loadServices,
+    autoCategorize: (n,u,d) => window.autoCategorize(n,u,d),
+    categorized, setServices: arr => { SERVICES = arr; },
+    getSearchInput: () => searchInput,
+    webSearch,
+    openSearch, closeSearch,
+    loadBookmarks, renderBookmarks, BOOKMARKS,
+    pollStats, renderBeszel,
+  };
+
+  /* ============================================================
+     Boot
+     ============================================================ */
+  (async function boot() {
+    try {
+      await migrateLegacyServices();           // pushes any legacy local links, clears local keys
+      SERVICES = await fetchServices();        // always re-fetch the authoritative list after migration
+      renderGroups();
+    } catch {
+      document.getElementById('api-offline').classList.remove('hidden');
+      renderGroups();
+    }
+    loadBookmarks();
+  })();
+</script>
+</body>
+</html>

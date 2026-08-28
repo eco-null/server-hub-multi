@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign in — Server Hub</title>
+  <link rel="icon" type="image/png" href="logo.png" />
+  <style>
+    :root {
+      --bg-deep: #020203; --bg-base: #050506; --bg-elev: #0a0a0c;
+      --surface: rgba(255,255,255,0.05); --surface-hi: rgba(255,255,255,0.08);
+      --border: rgba(255,255,255,0.08);  --border-hi: rgba(255,255,255,0.16);
+      --fg: #EDEDEF; --fg-muted: #8A8F98;
+      --accent: #5E6AD2; --accent-glow: rgba(94,106,210,0.20);
+      --red: #EF4444; --green: #22C55E;
+      --blob-a: #5E6AD2; --blob-b: #8B5CF6; --blob-c: #22C55E;
+      --blob-opacity: 0.18;
+      --ease: cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    html.light {
+      --bg-deep: #f4f6fb; --bg-base: #ffffff; --bg-elev: #fbfcfe;
+      --surface: rgba(15,23,42,0.04); --surface-hi: rgba(15,23,42,0.08);
+      --border: rgba(15,23,42,0.10);  --border-hi: rgba(15,23,42,0.20);
+      --fg: #0F172A; --fg-muted: #5a6072;
+      --accent: #4f56c0; --accent-glow: rgba(79,86,192,0.18);
+      --red: #dc2626; --green: #16a34a;
+      --blob-a: #818cf8; --blob-b: #c4b5fd; --blob-c: #86efac;
+      --blob-opacity: 0.45;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+      background-color: var(--bg-deep);
+      color: var(--fg);
+      display: flex; align-items: center; justify-content: center;
+      padding: 1.5rem;
+      background:
+        radial-gradient(1200px 800px at 12% -8%, color-mix(in srgb, var(--blob-a) 16%, transparent), transparent 60%),
+        radial-gradient(900px 700px at 92% 8%, color-mix(in srgb, var(--blob-b) 12%, transparent), transparent 55%),
+        linear-gradient(180deg, var(--bg-elev) 0%, var(--bg-deep) 70%);
+      transition: background-color 300ms var(--ease);
+    }
+    .blob {
+      position: fixed; border-radius: 9999px;
+      opacity: var(--blob-opacity); pointer-events: none; z-index: 0;
+      animation: drift 22s var(--ease) infinite alternate;
+      will-change: transform;
+      transform: translateZ(0);
+    }
+    .blob.a { width: 420px; height: 420px; background: radial-gradient(circle, var(--blob-a) 0%, transparent 72%); top: -120px; left: -80px; }
+    .blob.b { width: 360px; height: 360px; background: radial-gradient(circle, var(--blob-b) 0%, transparent 72%); top: 10vh; right: -120px; animation-delay: -6s; }
+    .blob.c { width: 320px; height: 320px; background: radial-gradient(circle, var(--blob-c) 0%, transparent 72%); bottom: -120px; left: 35%; opacity: calc(var(--blob-opacity) * 0.55); animation-delay: -12s; }
+    @keyframes drift {
+      0%   { transform: translate3d(0,0,0) scale(1); }
+      50%  { transform: translate3d(40px,30px,0) scale(1.08); }
+      100% { transform: translate3d(-30px,-20px,0) scale(0.96); }
+    }
+    .card {
+      position: relative; z-index: 1;
+      width: 100%; max-width: 400px;
+      background: var(--surface);
+      backdrop-filter: blur(20px) saturate(140%);
+      -webkit-backdrop-filter: blur(20px) saturate(140%);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 2.25rem 2rem;
+      text-align: center;
+      transition: background-color 300ms var(--ease), border-color 300ms var(--ease);
+    }
+    .logo {
+      width: 52px; height: 52px; margin: 0 auto 1rem;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 14px;
+      background: var(--accent); color: #fff;
+      box-shadow: 0 8px 28px -8px var(--accent-glow);
+    }
+    h1 { margin: 0 0 0.25rem; font-size: 1.35rem; font-weight: 600; letter-spacing: -0.01em; }
+    .sub { margin: 0 0 1.5rem; font-size: 0.85rem; color: var(--fg-muted); }
+
+    /* ---- Tabs (login / sign up) with smooth animated underline ---- */
+    .tabs {
+      display: grid; grid-template-columns: 1fr 1fr;
+      margin-bottom: 1.5rem; border-radius: 10px;
+      background: var(--surface-hi); padding: 3px; position: relative;
+    }
+    .tab {
+      appearance: none; border: 0; background: transparent; color: var(--fg-muted);
+      font-size: 0.85rem; font-weight: 500; padding: 0.5rem 0; cursor: pointer;
+      border-radius: 8px; transition: color 250ms var(--ease);
+      font-family: inherit;
+    }
+    .tab.active { color: var(--fg); background: var(--surface); box-shadow: 0 2px 8px -3px rgba(0,0,0,0.35); }
+
+    /* ---- Panel transition (smooth crossfade + slide) ---- */
+    .panel-wrap { position: relative; overflow: hidden; }
+    .panel {
+      transition: opacity 320ms var(--ease), transform 380ms var(--ease);
+    }
+    .panel.enter-left  { opacity: 0; transform: translateX(26px); }
+    .panel.enter-right { opacity: 0; transform: translateX(-26px); }
+    .panel.active { opacity: 1; transform: translateX(0); }
+    .panel.hidden { display: none; }
+
+    label { display: block; text-align: left; margin-bottom: 1rem; font-size: 0.8rem; color: var(--fg-muted); }
+    input {
+      width: 100%; margin-top: 0.4rem; padding: 0.65rem 0.8rem;
+      background: transparent; border: 1px solid var(--border); border-radius: 10px;
+      color: var(--fg); font-size: 0.9rem; outline: none;
+      transition: border-color 200ms var(--ease), background-color 200ms var(--ease);
+    }
+    input::placeholder { color: var(--fg-muted); }
+    input:focus { border-color: var(--accent); background: var(--surface-hi); }
+    button[type="submit"] {
+      width: 100%; margin-top: 0.5rem; padding: 0.7rem 1rem;
+      background: var(--accent); color: #fff; border: none; border-radius: 10px;
+      font-size: 0.9rem; font-weight: 500; cursor: pointer;
+      transition: background-color 200ms var(--ease), transform 150ms var(--ease), opacity 200ms var(--ease);
+      font-family: inherit;
+    }
+    button[type="submit"]:hover { background: color-mix(in srgb, var(--accent) 88%, white); transform: translateY(-1px); }
+    button[type="submit"]:active { transform: translateY(0); }
+    button[type="submit"]:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+    .error {
+      margin-top: 1rem; padding: 0.6rem 0.8rem;
+      border: 1px solid color-mix(in srgb, var(--red) 45%, var(--border));
+      background: color-mix(in srgb, var(--red) 10%, transparent);
+      border-radius: 10px; font-size: 0.8rem; color: var(--red);
+    }
+    .hidden { display: none; }
+    .success {
+      margin-top: 1rem; padding: 0.6rem 0.8rem;
+      border: 1px solid color-mix(in srgb, var(--green) 45%, var(--border));
+      background: color-mix(in srgb, var(--green) 10%, transparent);
+      border-radius: 10px; font-size: 0.8rem; color: var(--green);
+    }
+    .foot { margin-top: 1.4rem; font-size: 0.7rem; color: var(--fg-muted); font-family: 'Fira Code', monospace; }
+    @media (prefers-reduced-motion: reduce) { .blob, .panel { animation: none; transition: none; } }
+    @media (max-width: 768px), (pointer: coarse), (hover: none) {
+      .card { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+      .blob { animation: none !important; will-change: auto !important; transform: none !important; }
+      button[type="submit"]:hover { transform: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="blob a" aria-hidden="true"></div>
+  <div class="blob b" aria-hidden="true"></div>
+  <div class="blob c" aria-hidden="true"></div>
+
+  <div class="card">
+    <div class="logo">
+      <img src="logo.png" width="28" height="28" alt="Server Hub" />
+    </div>
+    <h1>Server Hub</h1>
+    <p class="sub" id="card-sub">Sign in to your dashboard</p>
+
+    <!-- Login / Sign up tabs -->
+    <div class="tabs" role="tablist" aria-label="Authentication">
+      <button class="tab active" id="tab-login" role="tab" aria-selected="true">Sign in</button>
+      <button class="tab" id="tab-signup" role="tab" aria-selected="false">Create account</button>
+    </div>
+
+    <!-- Login panel -->
+    <div class="panel-wrap">
+      <div class="panel active" id="panel-login" role="tabpanel">
+        <form method="post" action="/login" id="login-form" autocomplete="on" novalidate>
+          <div id="login-fields">
+            <label>Username or email
+              <input name="username" autocomplete="username" required placeholder="you@example.com" />
+            </label>
+            <label>Password
+              <input type="password" name="password" autocomplete="current-password" required placeholder="••••••••" />
+            </label>
+            <button type="submit">Sign in</button>
+          </div>
+          <div id="totp-fields" class="hidden">
+            <p class="sub" style="margin-bottom:0.75rem;">Two-factor authentication</p>
+            <label>Authenticator code
+              <input name="totp" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="000000" />
+            </label>
+            <button type="submit">Verify</button>
+          </div>
+        </form>
+        <p id="error-bad" class="error hidden">Invalid username or password.</p>
+        <p id="error-locked" class="error hidden">Too many attempts. Try again in a minute.</p>
+        <p id="error-totp" class="error hidden">Invalid authenticator code. Try again.</p>
+        <p id="error-expired" class="error hidden">Sign-in session expired. Please sign in again.</p>
+      </div>
+
+      <!-- Sign up panel -->
+      <div class="panel hidden" id="panel-signup" role="tabpanel">
+        <form method="post" action="/register" id="signup-form" autocomplete="on" novalidate>
+          <label>Email
+            <input type="email" name="username" autocomplete="email" required placeholder="you@example.com" />
+          </label>
+          <label>Password
+            <input type="password" name="password" autocomplete="new-password" minlength="8" required placeholder="At least 8 characters" />
+          </label>
+          <button type="submit">Create account</button>
+        </form>
+        <p id="error-signup" class="error hidden">Could not create the account. Email may already be in use.</p>
+      </div>
+    </div>
+
+    <p class="foot" id="footer-note"></p>
+  </div>
+
+  <script>
+    (function () {
+      var q = new URLSearchParams(location.search);
+      var root = document.documentElement;
+      var params = new URLSearchParams(location.search);
+      var err = params.get('error');
+      var show = function (id) { var el = document.getElementById(id); if (el) el.classList.remove('hidden'); };
+
+      // Show the right error (only on login)
+      if (err === '1') show('error-bad');
+      else if (err === 'locked') show('error-locked');
+      else if (err === 'totp') show('error-totp');
+      else if (err === 'expired') show('error-expired');
+
+      // 2FA step? Then hide the password step and focus the code field.
+      var totpMode = params.get('2fa') === '1';
+      if (totpMode) {
+        document.getElementById('login-fields').classList.add('hidden');
+        document.getElementById('totp-fields').classList.remove('hidden');
+        document.getElementById('card-sub').textContent = 'Verify your identity';
+        var codeInput = document.querySelector('input[name="totp"]');
+        if (codeInput) codeInput.focus();
+      }
+
+      // ---- Tabs with smooth transition ----
+      var tabLogin = document.getElementById('tab-login');
+      var tabSignup = document.getElementById('tab-signup');
+      var panelLogin = document.getElementById('panel-login');
+      var panelSignup = document.getElementById('panel-signup');
+      var sub = document.getElementById('card-sub');
+      var footerNote = document.getElementById('footer-note');
+
+      function switchPanel(panel, direc) {
+        panelSignup.classList.remove('active', 'enter-left', 'enter-right');
+        panelLogin.classList.remove('active', 'enter-left', 'enter-right');
+        // crossfade the incoming panel in from the side
+        panel.classList.add(direc);
+        // force reflow so the transition runs
+        void panel.offsetWidth;
+        panel.classList.remove(direc);
+        panel.classList.add('active');
+        panel.classList.remove('hidden');
+      }
+
+      function showLogin() {
+        tabLogin.classList.add('active'); tabLogin.setAttribute('aria-selected', 'true');
+        tabSignup.classList.remove('active'); tabSignup.setAttribute('aria-selected', 'false');
+        sub.textContent = 'Sign in to your dashboard';
+        if (panelSignup.classList.contains('active')) switchPanel(panelLogin, 'enter-left');
+        else { panelLogin.classList.remove('hidden'); panelLogin.classList.add('active'); panelSignup.classList.add('hidden'); }
+        footerNote.textContent = '';
+      }
+      function showSignup() {
+        tabSignup.classList.add('active'); tabSignup.setAttribute('aria-selected', 'true');
+        tabLogin.classList.remove('active'); tabLogin.setAttribute('aria-selected', 'false');
+        sub.textContent = 'Create your account';
+        if (panelLogin.classList.contains('active')) switchPanel(panelSignup, 'enter-right');
+        else { panelSignup.classList.remove('hidden'); panelSignup.classList.add('active'); panelLogin.classList.add('hidden'); }
+        footerNote.textContent = '';
+      }
+      tabLogin.addEventListener('click', showLogin);
+      tabSignup.addEventListener('click', showSignup);
+
+      // Sign-up errors land on /register?error=1 — expose the right panel on load.
+      if (params.get('signup') === '1' || q.get('error') === '1' && !totpMode && document.URL.indexOf('/register') !== -1) {
+        // register redirect comes back to /register — show signup panel
+      }
+      if (location.pathname.indexOf('register') !== -1 || params.get('show') === 'signup') {
+        // If we were redirected here after a failed register, reopen signup panel
+        panelSignup.classList.add('active'); panelSignup.classList.remove('hidden');
+        panelLogin.classList.add('hidden'); panelLogin.classList.remove('active');
+        tabSignup.classList.add('active'); tabSignup.setAttribute('aria-selected', 'true');
+        tabLogin.classList.remove('active'); tabLogin.setAttribute('aria-selected', 'false');
+        sub.textContent = 'Create your account';
+        show('error-signup');
+      }
+
+      // Auto-detect OS theme for the login page (light mode support).
+      function applyOsTheme() {
+        var dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        root.classList.toggle('light', !dark);
+      }
+      applyOsTheme();
+      window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyOsTheme);
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,42 @@
+# Dependencies / builds
+node_modules/
+
+# Agent / planning tooling (not part of the project)
+.opencode/
+.superpowers/
+.superpowers/**/*
+!/.superpowers/**/.gitkeep
+.agents/
+.claude/
+.planning/
+AGENTS.md
+docs/superpowers/
+
+# Generated knowledge graph
+graphify-out/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Runtime data
+services.json
+*.log
+
+# README backups
+README.md.bak-*
+.vercel
+.env*
