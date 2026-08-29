@@ -57,6 +57,37 @@ KNOWN_CATEGORIES = {
     "Other", "Gaming", "Books", "Money", "Travel", "Health",
 }
 
+# Supabase column mapping: API (camelCase) <-> DB (snake_case)
+_SERVICE_TO_DB = {"desc": "description", "categoryOverride": "category_override"}
+_DB_TO_SERVICE = {v: k for k, v in _SERVICE_TO_DB.items()}
+
+
+def _to_db_service(fields):
+    """Map API service fields (desc, categoryOverride) to DB columns."""
+    return {_SERVICE_TO_DB.get(k, k): v for k, v in fields.items()}
+
+
+def _from_db_service(row):
+    """Map DB service row (description, category_override) to API shape."""
+    if not isinstance(row, dict):
+        return row
+    out = {}
+    for k, v in row.items():
+        out[_DB_TO_SERVICE.get(k, k)] = v
+    # Normalize expected API keys
+    if "description" in row:
+        out["desc"] = row.get("description") or ""
+        out.pop("description", None)
+    if "category_override" in row:
+        out["categoryOverride"] = row.get("category_override")
+        out.pop("category_override", None)
+    # Ensure desc always present as string for frontend
+    if "desc" not in out:
+        out["desc"] = row.get("description") or row.get("desc") or ""
+    if "categoryOverride" not in out:
+        out["categoryOverride"] = row.get("category_override") if "category_override" in row else row.get("categoryOverride")
+    return out
+
 
 def validate_service(data, partial=False):
     """Validate a service object. Returns (fields, None) or (None, error)."""
@@ -823,7 +854,8 @@ class HubHandler(BaseHTTPRequestHandler):
         supa, user = self._supa()
         if supa is not None:
             try:
-                return supa.list_services(user["supabase_token"])
+                rows = supa.list_services(user["supabase_token"])
+                return [_from_db_service(r) for r in rows] if isinstance(rows, list) else rows
             except Exception:
                 return None
         return self.server.services.list()
@@ -1063,7 +1095,7 @@ class HubHandler(BaseHTTPRequestHandler):
             return self._api_error(400, err)
         if supa is not None:
             try:
-                payload = dict(fields)
+                payload = _to_db_service(fields)
                 payload["user_id"] = user["user_id"]
                 supa.insert("user_services", user["supabase_token"], payload)
             except Exception as e:
@@ -1085,7 +1117,8 @@ class HubHandler(BaseHTTPRequestHandler):
             return self._api_error(400, err)
         if supa is not None:
             try:
-                rows = supa.update("user_services", user["supabase_token"], fields, "?id=eq." + sid)
+                db_fields = _to_db_service(fields)
+                rows = supa.update("user_services", user["supabase_token"], db_fields, "?id=eq." + sid)
                 if not rows:
                     return self._api_error(404, "service not found")
             except Exception as e:
