@@ -866,12 +866,12 @@
   async function loadTwofaStatus() {
     try {
       const r = await fetch('/api/settings', { headers: { 'Accept': 'application/json' }, cache: 'no-store' });
-      if (!r.ok) return;
+      if (!r.ok) { renderTwofa(); return; }
       const d = await r.json();
       const t = (d.settings && d.settings.twofa) || {};
       twofaConfigured = !!t.enabled;
       renderTwofa();
-    } catch {}
+    } catch { renderTwofa(); }
   }
 
   function renderTwofa() {
@@ -917,7 +917,7 @@
     }
   });
 
-  twofaEls.start.addEventListener('click', () => twofaEls.enable.click());
+  if (twofaEls.start) twofaEls.start.addEventListener('click', () => twofaEls.enable.click());
 
   twofaEls.confirm.addEventListener('click', async () => {
     const code = twofaEls.code.value.trim();
