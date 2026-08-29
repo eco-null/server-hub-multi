@@ -377,7 +377,7 @@
           <div class="svc-row">
             <input id="new-name" class="field focus-ring" placeholder="Name (e.g. Grafana)" />
             <div class="flex gap-1 min-w-0">
-              <select id="new-scheme" class="field focus-ring w-14 shrink-0" aria-label="URL scheme">
+              <select id="new-scheme" class="field focus-ring w-28 shrink-0" aria-label="URL scheme">
                 <option value="https://" selected>https://</option>
                 <option value="http://">http://</option>
               </select>
@@ -443,7 +443,7 @@
         </div>
       </div>
       <div id="twofa-off" class="hidden mt-3">
-        <p class="text-xs text-[color:var(--fg-muted)]"></p>
+        <p class="text-xs text-[color:var(--fg-muted)]">Optional protection — nobody is forced to use it. <button id="twofa-start" class="underline hover:text-[color:var(--accent)] cursor-pointer">Enable 2FA →</button></p>
       </div>
       <div id="twofa-on" class="hidden mt-3">
         <p class="text-xs text-[color:var(--fg-muted)]">2FA is <span class="text-[color:var(--green)] font-medium">enabled</span> — every sign-in requires a code from your authenticator app.</p>
