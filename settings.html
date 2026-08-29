@@ -376,7 +376,7 @@
       <div id="svc-list" class="space-y-2"></div>
 
       <!-- Add new link form (collapsible) -->
-      <div id="add-form" class="hidden mt-4 pt-4 border-t border-[color:var(--border)]">
+      <form id="add-form" class="hidden mt-4 pt-4 border-t border-[color:var(--border)]" autocomplete="off" novalidate>
         <div class="space-y-2">
           <div class="svc-row">
             <input id="new-name" class="field focus-ring" placeholder="Name (e.g. Grafana)" />
@@ -392,7 +392,7 @@
           </div>
           <input id="new-desc" class="field focus-ring w-full" placeholder="Description (optional)" />
         </div>
-      </div>
+      </form>
     </section>
 
     <!-- Bookmarks editor -->
@@ -406,14 +406,14 @@
       <div id="bm-list" class="space-y-2"></div>
 
       <!-- Add new bookmark form (collapsible) -->
-      <div id="bm-add-form" class="hidden mt-4 pt-4 border-t border-[color:var(--border)]">
+      <form id="bm-add-form" class="hidden mt-4 pt-4 border-t border-[color:var(--border)]" autocomplete="off" novalidate>
         <div class="svc-row">
           <input id="bm-new-name" class="field focus-ring" placeholder="Name (e.g. YouTube)" />
           <input id="bm-new-url"  class="field focus-ring" type="text" placeholder="URL (e.g. https://youtube.com)" />
           <input id="bm-new-color" class="field focus-ring" type="color" value="#5E6AD2" title="Dot color" />
           <button id="bm-save" class="btn btn-primary focus-ring text-xs">Add</button>
         </div>
-      </div>
+      </form>
     </section>
 
     <!-- Backup -->
@@ -1137,7 +1137,6 @@
       toast('Add failed: ' + err.message);
     }
   }
-  newSave.addEventListener('click', addNew);
   addForm.addEventListener('submit', e => { e.preventDefault(); addNew(); });
 
   loadServices();
@@ -1254,7 +1253,6 @@
       toast('Add failed: ' + err.message);
     }
   }
-  bmSave.addEventListener('click', addBookmark);
   bmAddForm.addEventListener('submit', e => { e.preventDefault(); addBookmark(); });
 
   loadBookmarks();
