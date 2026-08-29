@@ -173,8 +173,10 @@
     .svc-row {
       display: grid; grid-template-columns: 1.4fr 1.6fr 1.6fr auto auto auto; gap: 8px; align-items: center;
     }
+    /* Add-form: description on its own row so URL input isn't cramped (user request). */
+    #add-form .svc-row { grid-template-columns: 1.15fr 1.85fr auto auto; }
     .svc-color { width: 2.25rem; height: 2rem; padding: 0; border: 1px solid var(--border); border-radius: 8px; background: transparent; cursor: pointer; }
-    @media (max-width: 720px) { .svc-row { grid-template-columns: 1fr; } .svc-row .hide-sm { display: none; } }
+    @media (max-width: 720px) { .svc-row, #add-form .svc-row { grid-template-columns: 1fr; } .svc-row .hide-sm { display: none; } }
     @media (prefers-reduced-motion: reduce) { * { transition: none !important; } .section { animation: none; } }
     @media (max-width: 768px), (pointer: coarse), (hover: none) {
       .glass,
@@ -371,18 +373,20 @@
 
       <!-- Add new link form (collapsible) -->
       <div id="add-form" class="hidden mt-4 pt-4 border-t border-[color:var(--border)]">
-        <div class="svc-row">
-          <input id="new-name" class="field focus-ring" placeholder="Name (e.g. Grafana)" />
-          <div class="flex gap-1 min-w-0">
-            <select id="new-scheme" class="field focus-ring w-14 shrink-0" aria-label="URL scheme">
-              <option value="https://" selected>https://</option>
-              <option value="http://">http://</option>
-            </select>
-            <input id="new-url"  class="field focus-ring min-w-0 flex-1" type="text" placeholder="host (e.g. immich.domain.com)" />
+        <div class="space-y-2">
+          <div class="svc-row">
+            <input id="new-name" class="field focus-ring" placeholder="Name (e.g. Grafana)" />
+            <div class="flex gap-1 min-w-0">
+              <select id="new-scheme" class="field focus-ring w-14 shrink-0" aria-label="URL scheme">
+                <option value="https://" selected>https://</option>
+                <option value="http://">http://</option>
+              </select>
+              <input id="new-url"  class="field focus-ring min-w-0 flex-1" type="text" placeholder="host (e.g. immich.domain.com)" />
+            </div>
+            <span class="hide-sm text-xs text-[color:var(--fg-muted)]">→ <span id="new-cat" class="pill">auto</span></span>
+            <button id="new-save" class="btn btn-primary focus-ring text-xs">Add</button>
           </div>
-          <input id="new-desc" class="field focus-ring" placeholder="Description (optional)" />
-          <span class="hide-sm text-xs text-[color:var(--fg-muted)]">→ <span id="new-cat" class="pill">auto</span></span>
-          <button id="new-save" class="btn btn-primary focus-ring text-xs">Add</button>
+          <input id="new-desc" class="field focus-ring w-full" placeholder="Description (optional)" />
         </div>
       </div>
     </section>
