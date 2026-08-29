@@ -1735,7 +1735,21 @@
      ============================================================ */
   const cfChip = document.getElementById('cf-chip');
   const logoutBtn = document.getElementById('logout-btn');
-  logoutBtn.addEventListener('click', () => { window.location.href = '/logout'; });
+  logoutBtn.addEventListener('click', () => {
+    try {
+      // Clear per-user local cache so next login doesn't leak previous user's data
+      if (window.HubSettings && window.HubSettings.clear) window.HubSettings.clear();
+      else {
+        try { localStorage.removeItem('server-hub:settings'); } catch {}
+        try { localStorage.removeItem('server-hub:services'); } catch {}
+        try { localStorage.removeItem('server-hub:theme'); } catch {}
+        try { localStorage.removeItem('server-hub:me'); } catch {}
+      }
+      try { localStorage.removeItem('server-hub:services'); } catch {}
+      try { sessionStorage.clear(); } catch {}
+    } catch {}
+    window.location.href = '/logout';
+  });
   async function pollIdentity() {
     try {
       const r = await fetch('/api/me', { cache: 'no-store' });
@@ -1745,6 +1759,19 @@
         cfChip.textContent = '👤 ' + d.email;
         cfChip.classList.remove('hidden');
         logoutBtn.classList.remove('hidden');
+        // Detect account switch: if email changed since last load, clear stale local cache and reload
+        try {
+          const last = localStorage.getItem('server-hub:me');
+          if (last && last !== d.email) {
+            if (window.HubSettings && window.HubSettings.clear) window.HubSettings.clear();
+            try { localStorage.removeItem('server-hub:services'); } catch {}
+            // Force reload of per-user data for new account
+            try { SERVICES = await fetchServices(); renderGroups(); } catch {}
+            try { await loadBookmarks(); } catch {}
+            try { const fresh = await window.HubSettings.loadFromServer(); if (fresh) window.HubSettings.apply(fresh); } catch {}
+          }
+          localStorage.setItem('server-hub:me', d.email);
+        } catch {}
       }
     } catch {}
   }

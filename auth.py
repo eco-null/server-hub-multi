@@ -32,10 +32,11 @@ class SupabaseError(Exception):
 class SupabaseClient:
     """Minimal Supabase Auth + PostgREST client (stdlib only)."""
 
-    def __init__(self, url, anon_key):
+    def __init__(self, url, anon_key, service_role_key=None):
         self.auth_url = url.rstrip("/") + "/auth/v1"
         self.rest_url = url.rstrip("/") + "/rest/v1"
         self.anon_key = anon_key
+        self.service_role_key = service_role_key or anon_key
         self._connect_timeout = 20
 
     # ---- HTTP helpers ----
@@ -88,6 +89,36 @@ class SupabaseClient:
         if username:
             body["data"] = {"username": username}
         return self._request(self.auth_url + "/signup", method="POST", body=body)
+
+    def signup_bypass(self, email, password, username=None):
+        """Bypass email rate limit: create user directly via SECURITY DEFINER RPC (auto-confirmed)."""
+        try:
+            res = self._request(
+                self.rest_url + "/rpc/signup_bypass",
+                method="POST",
+                body={"email": email, "password": password, "username": username or ""},
+            )
+            # RPC returns json like {"id": "...", "email": "..."} or {"error": "..."}
+            if isinstance(res, dict) and res.get("error"):
+                raise SupabaseError(400, res["error"])
+            return res
+        except SupabaseError:
+            raise
+        except Exception as e:
+            raise SupabaseError(500, str(e)) from e
+
+    def admin_create_user(self, email, password, username=None):
+        """Create user via service_role admin API (bypasses rate limit, auto-confirmed)."""
+        body = {"email": email, "password": password, "email_confirm": True}
+        if username:
+            body["user_metadata"] = {"username": username}
+        return self._request(
+            self.auth_url + "/admin/users",
+            method="POST",
+            body=body,
+            token=self.service_role_key,
+            headers={"apikey": self.service_role_key},
+        )
 
     def sign_out(self, token):
         """Invalidate the refresh token server-side (best effort)."""

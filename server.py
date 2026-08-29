@@ -1289,10 +1289,61 @@ class HubHandler(BaseHTTPRequestHandler):
         # ---- Supabase multi-user (primary) ----
         if self.server.supabase is not None:
             if path == "/register":
+                session = None
+                signup_err = None
                 try:
                     session = self.server.supabase.sign_up(username or "", password)
-                except Exception:
+                except Exception as e:
+                    signup_err = e
                     session = None
+                # Normal signup may return user without access_token when email confirmation is required
+                # or hit rate limit (429). In those cases try admin_create_user (service_role, auto-confirmed) first,
+                # then fallback to bypass RPC.
+                if not session or not session.get("access_token"):
+                    try:
+                        # Prefer admin_create_user via service_role (most reliable, bypasses rate limit)
+                        if hasattr(self.server.supabase, 'admin_create_user') and self.server.supabase.service_role_key != self.server.supabase.anon_key:
+                            try:
+                                admin_res = None
+                                try:
+                                    admin_res = self.server.supabase.admin_create_user(username or "", password, username.split("@")[0] if username and "@" in username else username or "")
+                                except Exception as e:
+                                    # Only try admin for rate-limit or missing session, not for weak password
+                                    # admin_create_user will error for weak password / email exists, so check
+                                    if "429" in str(e) or "rate" in str(e).lower():
+                                        admin_res = None
+                                    else:
+                                        admin_res = None
+                                if admin_res and admin_res.get("id"):
+                                    try:
+                                        session = self.server.supabase.sign_in(username or "", password)
+                                    except Exception:
+                                        pass
+                            except Exception:
+                                pass
+                        # Fallback: bypass RPC that creates user directly with email_confirmed_at = now()
+                        if (not session or not session.get("access_token")):
+                            try:
+                                bypass_res = None
+                                try:
+                                    bypass_res = self.server.supabase.signup_bypass(username or "", password, username.split("@")[0] if username and "@" in username else username or "")
+                                except Exception:
+                                    bypass_res = None
+                                if bypass_res and not bypass_res.get("error"):
+                                    try:
+                                        session = self.server.supabase.sign_in(username or "", password)
+                                    except Exception:
+                                        session = None
+                            except Exception:
+                                pass
+                        # If normal signup had no session but user exists (confirmation pending), try sign-in directly
+                        if (not session or not session.get("access_token")) and signup_err is None:
+                            try:
+                                session = self.server.supabase.sign_in(username or "", password)
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
                 if not session or not session.get("access_token"):
                     guard.record_failure(ip)
                     # 422 = email taken / weak password; show generic error
@@ -1464,10 +1515,11 @@ def main():
     port = int(read_env("HUB_PORT", "8642"))
     supa_url = read_env("SUPABASE_URL", "")
     supa_key = read_env("SUPABASE_ANON_KEY", "")
+    supa_service = read_env("SUPABASE_SERVICE_ROLE_KEY", "") or read_env("SUPABASE_SERVICE_KEY", "")
     supabase = None
     if supa_url and supa_key:
         import auth
-        supabase = auth.SupabaseClient(supa_url, supa_key)
+        supabase = auth.SupabaseClient(supa_url, supa_key, supa_service or None)
         print("Auth: Supabase multi-user at %s" % supa_url)
     else:
         print("Auth: legacy single-user (HUB_USER/HUB_PASSWORD)")

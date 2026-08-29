@@ -23,9 +23,10 @@ import server as hub_server  # noqa: E402
 _supa = None
 _supa_url = os.environ.get("SUPABASE_URL", "")
 _supa_key = os.environ.get("SUPABASE_ANON_KEY", "")
+_supa_service = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "") or os.environ.get("SUPABASE_SERVICE_KEY", "")
 if _supa_url and _supa_key:
     import auth  # noqa: E402
-    _supa = auth.SupabaseClient(_supa_url, _supa_key)
+    _supa = auth.SupabaseClient(_supa_url, _supa_key, _supa_service or None)
 
 _shared = hub_server.create_server(
     "127.0.0.1", int(os.environ.get("HUB_PORT", "8642")),

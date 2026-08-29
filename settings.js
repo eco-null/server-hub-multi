@@ -151,9 +151,24 @@ async function loadFromServer() {
       const row = await resp.json();
       const remote = (row && (row.settings || row)) || null;
       if (!remote || typeof remote !== 'object') return null;
-      const cur = read();
-      const next = deepMerge(cur, remote);
-      try { safeStorage.setItem(SETTINGS_KEY, JSON.stringify(next)); } catch {}
+      // If remote is empty (new user), don't keep old user's local settings — reset to defaults first
+      const isEmptyRemote = Object.keys(remote).length === 0;
+      let next;
+      if (isEmptyRemote) {
+        // Check if local has non-default values that would leak to new user
+        const cur = read();
+        const hasLocalChanges = JSON.stringify(cur) !== JSON.stringify(DEFAULTS);
+        if (hasLocalChanges) {
+          next = deepMerge(structuredCloneSafe(DEFAULTS), remote);
+          try { safeStorage.setItem(SETTINGS_KEY, JSON.stringify(next)); } catch {}
+        } else {
+          next = cur;
+        }
+      } else {
+        const cur = read();
+        next = deepMerge(cur, remote);
+        try { safeStorage.setItem(SETTINGS_KEY, JSON.stringify(next)); } catch {}
+      }
       emit(next);
       return next;
     } catch {
@@ -165,6 +180,15 @@ async function loadFromServer() {
 }
 
 function subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); }
+
+function clear() {
+  try { safeStorage.removeItem(SETTINGS_KEY); } catch {}
+  try { safeStorage.removeItem('server-hub:services'); } catch {}
+  try { safeStorage.removeItem('server-hub:theme'); } catch {}
+  const next = structuredCloneSafe(DEFAULTS);
+  emit(next);
+  return next;
+}
 
 function preferredDark() {
   return window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -321,6 +345,7 @@ if (typeof window !== 'undefined') {
     defaults: DEFAULTS,
     get: read,
     set,
+    clear,
     apply,
     subscribe,
     loadFromServer,

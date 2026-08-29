@@ -36,6 +36,9 @@ Thumbs.db
 services.json
 *.log
 
+# Supabase CLI
+supabase/
+
 # README backups
 README.md.bak-*
 .vercel
