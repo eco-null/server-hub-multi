@@ -8,46 +8,43 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap"
       rel="stylesheet"
     />
 
     <style>
       :root {
-        --canvas: #080b12;
-        --canvas-soft: #101726;
-        --panel: rgba(14, 20, 33, 0.82);
-        --field: rgba(255, 255, 255, 0.045);
-        --field-focus: rgba(255, 255, 255, 0.075);
-        --border: rgba(181, 199, 231, 0.14);
-        --border-strong: rgba(181, 199, 231, 0.26);
-        --text: #f4f7fb;
-        --muted: #9aa8be;
-        --subtle: #65738a;
-        --accent: #8ca7ff;
-        --accent-strong: #6f8fff;
-        --accent-wash: rgba(112, 143, 255, 0.18);
-        --danger: #fb7185;
-        --success: #4ade80;
+        --bg: #0e0e10;
+        --panel: #18181b;
+        --field: #1f1f23;
+        --field-focus: #27272a;
+        --border: rgba(255, 255, 255, 0.08);
+        --border-strong: rgba(255, 255, 255, 0.12);
+        --text: #fafafa;
+        --muted: #a1a1aa;
+        --subtle: #71717a;
+        --accent: #52525b;
+        --accent-hover: #3f3f46;
+        --danger: #e11d48;
+        --success: #16a34a;
+        --radius: 14px;
         --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
       }
 
       html.light {
-        --canvas: #f2f5fa;
-        --canvas-soft: #e7edf7;
-        --panel: rgba(255, 255, 255, 0.82);
-        --field: rgba(15, 23, 42, 0.04);
-        --field-focus: rgba(15, 23, 42, 0.07);
-        --border: rgba(15, 23, 42, 0.12);
-        --border-strong: rgba(15, 23, 42, 0.2);
-        --text: #111827;
-        --muted: #536176;
-        --subtle: #738198;
-        --accent: #4968d8;
-        --accent-strong: #3657c6;
-        --accent-wash: rgba(73, 104, 216, 0.13);
-        --danger: #dc3654;
-        --success: #168447;
+        --bg: #f4f4f5;
+        --panel: #ffffff;
+        --field: #fafafa;
+        --field-focus: #f4f4f5;
+        --border: rgba(0, 0, 0, 0.08);
+        --border-strong: rgba(0, 0, 0, 0.12);
+        --text: #18181b;
+        --muted: #71717a;
+        --subtle: #a1a1aa;
+        --accent: #52525b;
+        --accent-hover: #3f3f46;
+        --danger: #be123c;
+        --success: #15803d;
       }
 
       * {
@@ -67,189 +64,130 @@
         display: grid;
         place-items: center;
         padding: 24px;
-        background-color: var(--canvas);
+        background: var(--bg);
+        /* Minimal grey grid — no glows, no blobs, no gradients */
         background-image:
-          radial-gradient(900px 520px at 7% 2%, var(--accent-wash), transparent 66%),
-          radial-gradient(700px 620px at 100% 100%, rgba(68, 95, 165, 0.12), transparent 65%),
-          linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
-          linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
-          linear-gradient(145deg, var(--canvas) 0%, var(--canvas-soft) 100%);
-        background-size: auto, auto, 44px 44px, 44px 44px, auto;
+          linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+        background-size: 32px 32px;
       }
 
-      .auth-shell {
-        width: min(100%, 940px);
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(370px, 430px);
-        border: 1px solid var(--border);
-        border-radius: 22px;
-        overflow: hidden;
+      html.light body {
+        background-image:
+          linear-gradient(rgba(0, 0, 0, 0.04) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(0, 0, 0, 0.04) 1px, transparent 1px);
+      }
+
+      .shell {
+        width: min(100%, 400px);
         background: var(--panel);
-        box-shadow: 0 28px 90px rgba(0, 0, 0, 0.34);
-      }
-
-      .intro {
-        position: relative;
-        min-height: 590px;
-        padding: 46px;
-        display: flex;
-        flex-direction: column;
-        justify-content: space-between;
-        background: linear-gradient(150deg, rgba(140, 167, 255, 0.12), transparent 48%);
-        border-right: 1px solid var(--border);
-        overflow: hidden;
-      }
-
-      .intro::after {
-        content: "";
-        position: absolute;
-        width: 380px;
-        height: 380px;
-        border: 1px solid rgba(140, 167, 255, 0.19);
-        border-radius: 50%;
-        right: -180px;
-        bottom: -190px;
-        box-shadow:
-          0 0 0 42px rgba(140, 167, 255, 0.035),
-          0 0 0 84px rgba(140, 167, 255, 0.025);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 36px 32px 32px;
+        box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
       }
 
       .brand {
         display: flex;
         align-items: center;
-        gap: 12px;
+        justify-content: center;
+        gap: 10px;
+        margin-bottom: 28px;
         font-weight: 600;
+        font-size: 0.95rem;
         letter-spacing: -0.02em;
+        color: var(--text);
       }
 
       .brand-mark {
-        width: 34px;
-        height: 34px;
+        width: 30px;
+        height: 30px;
         display: grid;
         place-items: center;
-        border: 1px solid var(--border-strong);
-        border-radius: 10px;
-        background: rgba(255, 255, 255, 0.05);
+        border-radius: 8px;
+        background: var(--text);
+        color: var(--bg);
       }
 
       .brand-mark img {
-        width: 20px;
-        height: 20px;
+        width: 18px;
+        height: 18px;
+        filter: invert(1);
       }
 
-      .eyebrow {
-        margin: 0 0 16px;
-        color: var(--accent);
-        font: 500 11px / 1 "DM Mono", monospace;
-        letter-spacing: 0.13em;
-        text-transform: uppercase;
+      html.light .brand-mark {
+        background: var(--text);
+        color: var(--panel);
       }
 
-      .intro h2 {
-        max-width: 360px;
-        margin: 0;
-        font-size: clamp(2rem, 4vw, 3.15rem);
-        line-height: 1.08;
-        letter-spacing: -0.06em;
-      }
-
-      .intro p:not(.eyebrow) {
-        max-width: 330px;
-        margin: 20px 0 0;
-        color: var(--muted);
-        font-size: 0.94rem;
-        line-height: 1.7;
-      }
-
-      .intro-meta {
-        position: relative;
-        z-index: 1;
-        display: flex;
-        align-items: center;
-        gap: 9px;
-        color: var(--muted);
-        font: 11px / 1.4 "DM Mono", monospace;
-      }
-
-      .indicator {
-        width: 7px;
-        height: 7px;
-        border-radius: 50%;
-        background: var(--success);
-        box-shadow: 0 0 0 4px color-mix(in srgb, var(--success) 12%, transparent);
-      }
-
-      .auth-card {
-        padding: 42px;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-      }
-
-      .card-heading {
-        margin-bottom: 28px;
+      html.light .brand-mark img {
+        filter: none;
       }
 
       h1 {
-        margin: 0 0 8px;
-        font-size: 1.5rem;
-        letter-spacing: -0.04em;
+        margin: 0 0 6px;
+        font-size: 1.35rem;
+        font-weight: 600;
+        letter-spacing: -0.03em;
+        text-align: center;
       }
 
       .sub {
-        margin: 0;
+        margin: 0 0 24px;
         color: var(--muted);
-        font-size: 0.88rem;
-        line-height: 1.55;
+        font-size: 0.85rem;
+        line-height: 1.5;
+        text-align: center;
       }
 
       .tabs {
         display: grid;
         grid-template-columns: 1fr 1fr;
         gap: 4px;
-        margin: 0 0 25px;
+        margin: 0 0 24px;
         padding: 4px;
         border: 1px solid var(--border);
-        border-radius: 11px;
-        background: rgba(255, 255, 255, 0.025);
+        border-radius: 10px;
+        background: var(--field);
       }
 
       .tab {
         appearance: none;
         border: 0;
         border-radius: 7px;
-        padding: 9px 10px;
+        padding: 8px 10px;
         background: transparent;
         color: var(--muted);
         cursor: pointer;
         font: 500 0.8rem / 1 Inter, sans-serif;
-        transition: 0.2s var(--ease);
+        transition: 0.15s var(--ease);
       }
 
       .tab.active {
         color: var(--text);
-        background: var(--field-focus);
-        box-shadow: 0 1px 5px rgba(0, 0, 0, 0.16);
-      }
-
-      .panel-wrap {
-        position: relative;
+        background: var(--panel);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+        border: 1px solid var(--border);
       }
 
       .panel {
         transition:
-          opacity 0.26s var(--ease),
-          transform 0.3s var(--ease);
+          opacity 0.2s var(--ease),
+          transform 0.2s var(--ease);
+      }
+
+      .panel.hidden {
+        display: none;
       }
 
       .panel.enter-left {
         opacity: 0;
-        transform: translateX(16px);
+        transform: translateX(12px);
       }
 
       .panel.enter-right {
         opacity: 0;
-        transform: translateX(-16px);
+        transform: translateX(-12px);
       }
 
       .panel.active {
@@ -257,33 +195,27 @@
         transform: none;
       }
 
-      .panel.hidden,
-      .hidden {
-        display: none;
-      }
-
       label {
         display: block;
-        margin: 0 0 16px;
+        margin: 0 0 14px;
         color: var(--muted);
-        font-size: 0.77rem;
+        font-size: 0.75rem;
         font-weight: 500;
       }
 
       input {
         width: 100%;
-        margin-top: 7px;
-        padding: 12px 13px;
+        margin-top: 6px;
+        padding: 11px 12px;
         border: 1px solid var(--border);
-        border-radius: 9px;
+        border-radius: 8px;
         outline: none;
         color: var(--text);
         background: var(--field);
-        font: 400 0.9rem / 1.25 Inter, sans-serif;
+        font: 400 0.875rem / 1.3 Inter, sans-serif;
         transition:
-          border-color 0.2s var(--ease),
-          background 0.2s var(--ease),
-          box-shadow 0.2s var(--ease);
+          border-color 0.15s var(--ease),
+          background 0.15s var(--ease);
       }
 
       input::placeholder {
@@ -291,240 +223,175 @@
       }
 
       input:focus {
-        border-color: var(--accent);
+        border-color: var(--border-strong);
         background: var(--field-focus);
-        box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
       }
 
       button[type="submit"] {
         width: 100%;
-        margin-top: 4px;
-        padding: 12px 16px;
+        margin-top: 8px;
+        padding: 11px 16px;
         border: 0;
-        border-radius: 9px;
+        border-radius: 8px;
         color: #fff;
         cursor: pointer;
-        background: var(--accent-strong);
-        box-shadow: 0 10px 20px -10px var(--accent-strong);
-        font: 600 0.86rem / 1.25 Inter, sans-serif;
-        transition:
-          transform 0.18s var(--ease),
-          background 0.18s var(--ease),
-          box-shadow 0.18s var(--ease);
+        background: var(--text);
+        font: 500 0.875rem / 1 Inter, sans-serif;
+        transition: opacity 0.15s var(--ease);
+      }
+
+      html.light button[type="submit"] {
+        background: #18181b;
       }
 
       button[type="submit"]:hover {
-        transform: translateY(-1px);
-        background: var(--accent);
-        box-shadow: 0 14px 24px -12px var(--accent);
+        opacity: 0.9;
       }
 
       button[type="submit"]:active {
-        transform: none;
+        opacity: 0.8;
       }
 
       button[type="submit"]:disabled {
-        opacity: 0.55;
+        opacity: 0.5;
         cursor: not-allowed;
-        transform: none;
-      }
-
-      .error,
-      .success {
-        margin: 16px 0 0;
-        padding: 10px 11px;
-        border-radius: 8px;
-        font-size: 0.76rem;
-        line-height: 1.4;
       }
 
       .error {
-        border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border));
+        margin: 14px 0 0;
+        padding: 10px 12px;
+        border-radius: 8px;
+        font-size: 0.78rem;
+        line-height: 1.4;
+        border: 1px solid color-mix(in srgb, var(--danger) 20%, transparent);
         color: var(--danger);
-        background: color-mix(in srgb, var(--danger) 9%, transparent);
-      }
-
-      .success {
-        border: 1px solid color-mix(in srgb, var(--success) 35%, var(--border));
-        color: var(--success);
-        background: color-mix(in srgb, var(--success) 9%, transparent);
+        background: color-mix(in srgb, var(--danger) 6%, transparent);
       }
 
       .foot {
-        min-height: 17px;
-        margin: 23px 0 0;
+        margin: 20px 0 0;
         color: var(--subtle);
-        font: 10px / 1.5 "DM Mono", monospace;
+        font: 400 0.7rem / 1.4 Inter, sans-serif;
+        text-align: center;
+      }
+
+      .foot a {
+        color: var(--muted);
+        text-decoration: none;
+      }
+
+      .foot a:hover {
+        color: var(--text);
+        text-decoration: underline;
       }
 
       @media (prefers-reduced-motion: reduce) {
         *,
         *::before,
         *::after {
-          scroll-behavior: auto !important;
           transition: none !important;
-        }
-      }
-
-      @media (max-width: 760px) {
-        body {
-          padding: 16px;
-        }
-
-        .auth-shell {
-          grid-template-columns: 1fr;
-          max-width: 450px;
-        }
-
-        .intro {
-          min-height: auto;
-          padding: 25px 26px;
-          border-right: 0;
-          border-bottom: 1px solid var(--border);
-        }
-
-        .intro h2,
-        .intro p:not(.eyebrow),
-        .intro-meta {
-          display: none;
-        }
-
-        .auth-card {
-          padding: 31px 26px;
         }
       }
     </style>
   </head>
 
   <body>
-    <main class="auth-shell">
-      <section class="intro" aria-label="Server Hub introduction">
-        <div class="brand">
-          <span class="brand-mark">
-            <img src="logo.png" alt="" />
-          </span>
-          <span>Server Hub</span>
-        </div>
+    <main class="shell" aria-label="Authentication">
+      <div class="brand">
+        <span class="brand-mark"><img src="logo.png" alt="" /></span>
+        <span>Server Hub</span>
+      </div>
 
-        <div>
-          <p class="eyebrow">Infrastructure workspace</p>
-          <h2>Everything you run, in one controlled place.</h2>
-          <p>Manage your services through a secure, focused dashboard built for the systems you rely on.</p>
-        </div>
+      <h1 id="card-title">Welcome back</h1>
+      <p class="sub" id="card-sub">Sign in to your workspace.</p>
 
-        <div class="intro-meta">
-          <span class="indicator" aria-hidden="true"></span>
-          <span></span>
-        </div>
-      </section>
+      <div class="tabs" role="tablist" aria-label="Authentication">
+        <button class="tab active" id="tab-login" role="tab" aria-selected="true">Sign in</button>
+        <button class="tab" id="tab-signup" role="tab" aria-selected="false">Create account</button>
+      </div>
 
-      <section class="auth-card" aria-label="Authentication">
-        <div class="card-heading">
-          <h1>Welcome back</h1>
-          <p class="sub" id="card-sub">Sign in to continue to your workspace.</p>
-        </div>
-
-        <div class="tabs" role="tablist" aria-label="Authentication">
-          <button class="tab active" id="tab-login" role="tab" aria-selected="true">Sign in</button>
-          <button class="tab" id="tab-signup" role="tab" aria-selected="false">Create account</button>
-        </div>
-
-        <div class="panel-wrap">
-          <div class="panel active" id="panel-login" role="tabpanel">
-            <form method="post" action="/login" id="login-form" autocomplete="on" novalidate>
-              <div id="login-fields">
-                <label>
-                  Username or email
-                  <input name="username" autocomplete="username" required placeholder="you@example.com" />
-                </label>
-                <label>
-                  Password
-                  <input
-                    type="password"
-                    name="password"
-                    autocomplete="current-password"
-                    required
-                    placeholder="Enter your password"
-                  />
-                </label>
-                <button type="submit">Sign in</button>
-              </div>
-
-              <div id="totp-fields" class="hidden">
-                <p class="sub" style="margin-bottom: 16px">Two-factor authentication</p>
-                <label>
-                  Authenticator code
-                  <input
-                    name="totp"
-                    inputmode="numeric"
-                    maxlength="6"
-                    autocomplete="one-time-code"
-                    placeholder="000000"
-                  />
-                </label>
-                <button type="submit">Verify access</button>
-              </div>
-            </form>
-
-            <p id="error-bad" class="error hidden">Invalid username or password.</p>
-            <p id="error-locked" class="error hidden">Too many attempts. Try again in a minute.</p>
-            <p id="error-totp" class="error hidden">Invalid authenticator code. Try again.</p>
-            <p id="error-expired" class="error hidden">Sign-in session expired. Please sign in again.</p>
-          </div>
-
-          <div class="panel hidden" id="panel-signup" role="tabpanel">
-            <form method="post" action="/register" id="signup-form" autocomplete="on" novalidate>
+      <div class="panel-wrap">
+        <div class="panel active" id="panel-login" role="tabpanel">
+          <form method="post" action="/login" id="login-form" autocomplete="on" novalidate>
+            <div id="login-fields">
               <label>
-                Email
-                <input type="email" name="email" autocomplete="email" required placeholder="you@example.com" />
-              </label>
-              <label>
-                Username
-                <input
-                  type="text"
-                  name="username"
-                  autocomplete="username"
-                  required
-                  minlength="3"
-                  maxlength="20"
-                  pattern="[a-zA-Z0-9_]+"
-                  placeholder="your_username"
-                  title="3-20 characters, letters, numbers and underscore only"
-                />
+                Username or email
+                <input name="username" autocomplete="username" required placeholder="you@example.com" />
               </label>
               <label>
                 Password
                 <input
                   type="password"
                   name="password"
-                  autocomplete="new-password"
-                  minlength="8"
+                  autocomplete="current-password"
                   required
-                  placeholder="At least 8 characters"
+                  placeholder="••••••••"
                 />
               </label>
-              <!-- Bulk prevention: honeypot + timestamp (bots fill hidden field or submit instantly) -->
-              <div
-                style="position: absolute; left: -5000px; top: auto; width: 1px; height: 1px; overflow: hidden"
-                aria-hidden="true"
-              >
-                <label>Leave this field empty <input type="text" name="website_url" tabindex="-1" autocomplete="off" /></label>
-              </div>
-              <input type="hidden" name="form_ts" id="signup-ts" value="" />
-              <button type="submit" id="signup-btn">Create account</button>
-              <p class="sub" style="margin-top: 10px; font-size: 0.72rem; color: var(--subtle)">
-                Protected against bulk creation — please wait 2 seconds before submitting.
-              </p>
-            </form>
+              <button type="submit">Sign in</button>
+            </div>
 
-            <p id="error-signup" class="error hidden">Could not create the account. Email or username may already be in use.</p>
-            <p id="error-signup-rate" class="error hidden">Too many accounts created from this network. Try again in 15 minutes.</p>
-            <p id="error-signup-honeypot" class="error hidden">Bot check failed. Please try again.</p>
-          </div>
+            <div id="totp-fields" class="hidden">
+              <p class="sub" style="margin-bottom: 14px">Two-factor authentication</p>
+              <label>
+                Authenticator code
+                <input name="totp" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="000000" />
+              </label>
+              <button type="submit">Verify</button>
+            </div>
+          </form>
+
+          <p id="error-bad" class="error hidden">Invalid username or password.</p>
+          <p id="error-locked" class="error hidden">Too many attempts. Try again in a minute.</p>
+          <p id="error-totp" class="error hidden">Invalid code. Try again.</p>
+          <p id="error-expired" class="error hidden">Session expired. Please sign in again.</p>
         </div>
 
-        <p class="foot" id="footer-note"></p>
-      </section>
+        <div class="panel hidden" id="panel-signup" role="tabpanel">
+          <form method="post" action="/register" id="signup-form" autocomplete="on" novalidate>
+            <label>
+              Email
+              <input type="email" name="email" autocomplete="email" required placeholder="you@example.com" />
+            </label>
+            <label>
+              Username
+              <input
+                type="text"
+                name="username"
+                autocomplete="username"
+                required
+                minlength="3"
+                maxlength="20"
+                pattern="[a-zA-Z0-9_]+"
+                placeholder="your_username"
+                title="3-20 characters, letters, numbers and underscore"
+              />
+            </label>
+            <label>
+              Password
+              <input
+                type="password"
+                name="password"
+                autocomplete="new-password"
+                minlength="8"
+                required
+                placeholder="At least 8 characters"
+              />
+            </label>
+            <div style="position: absolute; left: -5000px; top: auto; width: 1px; height: 1px; overflow: hidden" aria-hidden="true">
+              <label>Leave empty <input type="text" name="website_url" tabindex="-1" autocomplete="off" /></label>
+            </div>
+            <input type="hidden" name="form_ts" id="signup-ts" value="" />
+            <button type="submit" id="signup-btn">Create account</button>
+          </form>
+
+          <p id="error-signup" class="error hidden">Email or username already in use.</p>
+          <p id="error-signup-rate" class="error hidden">Too many accounts from this network. Try again in 15 minutes.</p>
+          <p id="error-signup-honeypot" class="error hidden">Bot check failed.</p>
+        </div>
+      </div>
+
+      <p class="foot">Self-hosted • Private • No tracking</p>
     </main>
 
     <script>
@@ -549,7 +416,8 @@
         if (totpMode) {
           document.getElementById("login-fields").classList.add("hidden");
           document.getElementById("totp-fields").classList.remove("hidden");
-          document.getElementById("card-sub").textContent = "Verify your identity to continue.";
+          document.getElementById("card-sub").textContent = "Enter your authenticator code.";
+          document.getElementById("card-title").textContent = "Two-factor";
           var codeInput = document.querySelector('input[name="totp"]');
           if (codeInput) codeInput.focus();
         }
@@ -559,7 +427,7 @@
         var panelLogin = document.getElementById("panel-login");
         var panelSignup = document.getElementById("panel-signup");
         var sub = document.getElementById("card-sub");
-        var footerNote = document.getElementById("footer-note");
+        var title = document.getElementById("card-title");
 
         function switchPanel(panel, direction) {
           panelSignup.classList.remove("active", "enter-left", "enter-right");
@@ -576,7 +444,8 @@
           tabLogin.setAttribute("aria-selected", "true");
           tabSignup.classList.remove("active");
           tabSignup.setAttribute("aria-selected", "false");
-          sub.textContent = "Sign in to continue to your workspace.";
+          title.textContent = "Welcome back";
+          sub.textContent = "Sign in to your workspace.";
           if (panelSignup.classList.contains("active")) {
             switchPanel(panelLogin, "enter-left");
             panelSignup.classList.add("hidden");
@@ -585,7 +454,6 @@
             panelLogin.classList.add("active");
             panelSignup.classList.add("hidden");
           }
-          footerNote.textContent = "";
         }
 
         function showSignup() {
@@ -593,7 +461,8 @@
           tabSignup.setAttribute("aria-selected", "true");
           tabLogin.classList.remove("active");
           tabLogin.setAttribute("aria-selected", "false");
-          sub.textContent = "Create an account for your workspace.";
+          title.textContent = "Create account";
+          sub.textContent = "Start your workspace.";
           if (panelLogin.classList.contains("active")) {
             switchPanel(panelSignup, "enter-right");
             panelLogin.classList.add("hidden");
@@ -602,7 +471,6 @@
             panelSignup.classList.add("active");
             panelLogin.classList.add("hidden");
           }
-          footerNote.textContent = "";
         }
 
         tabLogin.addEventListener("click", showLogin);
@@ -615,7 +483,6 @@
           else if (err === "honeypot") show("error-signup-honeypot");
         }
 
-        // Bulk prevention: set timestamp for signup form (must be >2s old on submit)
         var tsEl = document.getElementById("signup-ts");
         var signupForm = document.getElementById("signup-form");
         var signupBtn = document.getElementById("signup-btn");
@@ -628,14 +495,12 @@
           signupForm.addEventListener("submit", function (e) {
             var ts = parseInt(tsEl && tsEl.value, 10);
             var elapsed = Date.now() - ts;
-            // Require at least 1.5s between form open and submit (bots are instant)
             if (!ts || elapsed < 1500) {
               e.preventDefault();
               show("error-signup-honeypot");
               setTs();
               return;
             }
-            // Username validation (client-side, server also validates)
             var uname = signupForm.querySelector('input[name="username"]');
             if (uname && !/^[a-zA-Z0-9_]{3,20}$/.test(uname.value.trim())) {
               e.preventDefault();
@@ -649,12 +514,11 @@
           });
         }
 
-        function applyOsTheme() {
+        function applyTheme() {
           root.classList.toggle("light", !window.matchMedia("(prefers-color-scheme: dark)").matches);
         }
-
-        applyOsTheme();
-        window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyOsTheme);
+        applyTheme();
+        window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
       })();
     </script>
   </body>

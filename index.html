@@ -1727,11 +1727,19 @@
     openAddModal();
   });
 
-  // Re-render when settings change in another tab (services are server-side now)
+  // Re-render when settings change in another tab (services, blobs, wallpaper, theme)
   window.addEventListener('storage', async e => {
     if (e.key === window.HubSettings.KEY) {
+      try {
+        const s = window.HubSettings.get();
+        window.HubSettings.apply(s);
+        window.HubSettings.applyWallpaper(s);
+        applyTheme(s.theme);
+        syncThemeToggle();
+      } catch {}
       try { SERVICES = await fetchServices(); } catch {}
       renderGroups();
+      try { await loadBookmarks(); } catch {}
     }
   });
 
