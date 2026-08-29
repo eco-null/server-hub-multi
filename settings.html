@@ -195,7 +195,7 @@
     <header class="flex items-center justify-between gap-3">
       <div>
         <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">Settings</h1>
-        <p class="text-sm text-[color:var(--fg-muted)] mt-1">Personalize Server Hub. Saved to your browser (localStorage) — no server required.</p>
+        <p class="text-sm text-[color:var(--fg-muted)] mt-1"></p>
       </div>
       <a href="index.html" class="btn focus-ring" aria-label="Back to dashboard">← Back</a>
     </header>
@@ -274,7 +274,7 @@
       <div class="row-grid">
         <label class="block">
           <span class="text-sm font-medium">Your name <span class="text-[color:var(--fg-muted)] text-xs">(optional, shown in greeting)</span></span>
-          <input id="user-name" class="field mt-1.5" placeholder="e.g. Can" autocomplete="off" />
+          <input id="user-name" class="field mt-1.5" placeholder="Your Name" autocomplete="off" />
         </label>
         <label class="block">
           <span class="text-sm font-medium">Page title</span>
@@ -282,7 +282,7 @@
         </label>
         <label class="block">
           <span class="text-sm font-medium">Subtitle</span>
-          <input id="subtitle" class="field mt-1.5" placeholder="Your self-hosted apps…" maxlength="120" />
+          <input id="subtitle" class="field mt-1.5" placeholder="Simple Hub For All Your Services" maxlength="120" />
         </label>
       </div>
       <div class="flex items-center justify-between pt-2">
@@ -327,9 +327,7 @@
           </div>
         </div>
         <p class="text-xs text-[color:var(--fg-muted)] mt-2">
-          Your Beszel credentials are stored encrypted in your own settings
-          (Supabase, per-user) — never in the browser or shared with others.
-          Leave empty to keep using the server-wide env config
+          Your Beszel credentials are stored encrypted in your own settings, never in the browser.
           (<code class="text-[color:var(--fg)]">BESZEL_URL</code>).
         </p>
       </div>
@@ -368,7 +366,7 @@
         <h2 class="h2">Your links</h2>
         <button id="add-svc" class="btn btn-primary focus-ring text-xs">+ Add link</button>
       </div>
-      <p class="text-xs text-[color:var(--fg-muted)] mb-4">Links are stored permanently on the server (<code class="text-[color:var(--fg)]">services.json</code>) and shared across all devices.</p>
+      <p class="text-xs text-[color:var(--fg-muted)] mb-4">Links are stored permanently on the server and shared across all your devices.</p>
 
       <div id="svc-list" class="space-y-2"></div>
 
@@ -396,7 +394,7 @@
         <h2 class="h2">Bookmarks</h2>
         <button id="add-bm" class="btn btn-primary focus-ring text-xs">+ Add bookmark</button>
       </div>
-      <p class="text-xs text-[color:var(--fg-muted)] mb-4">Bookmarks are stored permanently on the server (<code class="text-[color:var(--fg)]">services.json</code>) and shown on your dashboard.</p>
+      <p class="text-xs text-[color:var(--fg-muted)] mb-4">Bookmarks are stored permanently on the server and shown on your dashboard.</p>
 
       <div id="bm-list" class="space-y-2"></div>
 
@@ -453,7 +451,7 @@
     <section class="glass section">
       <h2 class="h2 mb-4">Backup</h2>
       <div class="flex items-center justify-between gap-3 flex-wrap">
-        <p class="text-sm text-[color:var(--fg-muted)] max-w-md">Export all settings, links, and bookmarks to a JSON file. Import to restore after an update.</p>
+        <p class="text-sm text-[color:var(--fg-muted)] max-w-md">Export all settings, links, and bookmarks to a JSON file. Import to restore.</p>
         <div class="flex gap-2">
           <button id="export-btn" class="btn focus-ring text-xs">Export</button>
           <label class="btn focus-ring text-xs cursor-pointer">
