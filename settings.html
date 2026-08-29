@@ -175,8 +175,12 @@
     }
     /* Add-form: description on its own row so URL input isn't cramped (user request). */
     #add-form .svc-row { grid-template-columns: 1.15fr 1.85fr auto auto; }
+    /* Bookmarks: color picker same width as Add button, Name 30% / URL 70% */
+    #bm-add-form .svc-row { grid-template-columns: minmax(0,0.9fr) minmax(0,2.1fr) 64px 64px; }
+    #bm-add-form #bm-new-color { width: 64px; height: 38px; padding: 3px; cursor: pointer; }
+    #bm-add-form #bm-save { width: 64px; justify-content: center; display: inline-flex; align-items: center; }
     .svc-color { width: 2.25rem; height: 2rem; padding: 0; border: 1px solid var(--border); border-radius: 8px; background: transparent; cursor: pointer; }
-    @media (max-width: 720px) { .svc-row, #add-form .svc-row { grid-template-columns: 1fr; } .svc-row .hide-sm { display: none; } }
+    @media (max-width: 720px) { .svc-row, #add-form .svc-row, #bm-add-form .svc-row { grid-template-columns: 1fr; } .svc-row .hide-sm { display: none; } #bm-add-form #bm-new-color, #bm-add-form #bm-save { width: 100%; } }
     @media (prefers-reduced-motion: reduce) { * { transition: none !important; } .section { animation: none; } }
     @media (max-width: 768px), (pointer: coarse), (hover: none) {
       .glass,
@@ -443,7 +447,7 @@
         </div>
       </div>
       <div id="twofa-off" class="hidden mt-3">
-        <p class="text-xs text-[color:var(--fg-muted)]">Optional protection — nobody is forced to use it. <button id="twofa-start" class="underline hover:text-[color:var(--accent)] cursor-pointer">Enable 2FA →</button></p>
+        <p class="text-xs text-[color:var(--fg-muted)]"></p>
       </div>
       <div id="twofa-on" class="hidden mt-3">
         <p class="text-xs text-[color:var(--fg-muted)]">2FA is <span class="text-[color:var(--green)] font-medium">enabled</span> — every sign-in requires a code from your authenticator app.</p>
