@@ -120,6 +120,30 @@ class SupabaseClient:
             headers={"apikey": self.service_role_key},
         )
 
+    def get_email_by_username(self, username):
+        """Resolve username -> email via SECURITY DEFINER RPC (for login with username)."""
+        try:
+            res = self._request(self.rest_url + "/rpc/get_email_by_username", method="POST", body={"uname": username})
+            if isinstance(res, str):
+                return res
+            if isinstance(res, dict) and "get_email_by_username" in res:
+                return res["get_email_by_username"]
+            return res
+        except Exception:
+            return None
+
+    def username_exists(self, username):
+        """Check if username exists (bypasses RLS)."""
+        try:
+            res = self._request(self.rest_url + "/rpc/username_exists", method="POST", body={"uname": username})
+            if isinstance(res, bool):
+                return res
+            if isinstance(res, dict) and "username_exists" in res:
+                return bool(res["username_exists"])
+            return bool(res)
+        except Exception:
+            return False
+
     def sign_out(self, token):
         """Invalidate the refresh token server-side (best effort)."""
         try:

@@ -476,7 +476,21 @@
             <form method="post" action="/register" id="signup-form" autocomplete="on" novalidate>
               <label>
                 Email
-                <input type="email" name="username" autocomplete="email" required placeholder="you@example.com" />
+                <input type="email" name="email" autocomplete="email" required placeholder="you@example.com" />
+              </label>
+              <label>
+                Username
+                <input
+                  type="text"
+                  name="username"
+                  autocomplete="username"
+                  required
+                  minlength="3"
+                  maxlength="20"
+                  pattern="[a-zA-Z0-9_]+"
+                  placeholder="your_username"
+                  title="3-20 characters, letters, numbers and underscore only"
+                />
               </label>
               <label>
                 Password
@@ -489,10 +503,23 @@
                   placeholder="At least 8 characters"
                 />
               </label>
-              <button type="submit">Create account</button>
+              <!-- Bulk prevention: honeypot + timestamp (bots fill hidden field or submit instantly) -->
+              <div
+                style="position: absolute; left: -5000px; top: auto; width: 1px; height: 1px; overflow: hidden"
+                aria-hidden="true"
+              >
+                <label>Leave this field empty <input type="text" name="website_url" tabindex="-1" autocomplete="off" /></label>
+              </div>
+              <input type="hidden" name="form_ts" id="signup-ts" value="" />
+              <button type="submit" id="signup-btn">Create account</button>
+              <p class="sub" style="margin-top: 10px; font-size: 0.72rem; color: var(--subtle)">
+                Protected against bulk creation — please wait 2 seconds before submitting.
+              </p>
             </form>
 
-            <p id="error-signup" class="error hidden">Could not create the account. Email may already be in use.</p>
+            <p id="error-signup" class="error hidden">Could not create the account. Email or username may already be in use.</p>
+            <p id="error-signup-rate" class="error hidden">Too many accounts created from this network. Try again in 15 minutes.</p>
+            <p id="error-signup-honeypot" class="error hidden">Bot check failed. Please try again.</p>
           </div>
         </div>
 
@@ -515,6 +542,8 @@
         else if (err === "locked") show("error-locked");
         else if (err === "totp") show("error-totp");
         else if (err === "expired") show("error-expired");
+        else if (err === "rate") show("error-signup-rate");
+        else if (err === "honeypot") show("error-signup-honeypot");
 
         var totpMode = params.get("2fa") === "1";
         if (totpMode) {
@@ -582,6 +611,42 @@
         if (location.pathname.indexOf("register") !== -1 || params.get("show") === "signup") {
           showSignup();
           if (err === "1") show("error-signup");
+          else if (err === "rate") show("error-signup-rate");
+          else if (err === "honeypot") show("error-signup-honeypot");
+        }
+
+        // Bulk prevention: set timestamp for signup form (must be >2s old on submit)
+        var tsEl = document.getElementById("signup-ts");
+        var signupForm = document.getElementById("signup-form");
+        var signupBtn = document.getElementById("signup-btn");
+        function setTs() {
+          if (tsEl) tsEl.value = String(Date.now());
+        }
+        setTs();
+        if (tabSignup) tabSignup.addEventListener("click", setTs);
+        if (signupForm) {
+          signupForm.addEventListener("submit", function (e) {
+            var ts = parseInt(tsEl && tsEl.value, 10);
+            var elapsed = Date.now() - ts;
+            // Require at least 1.5s between form open and submit (bots are instant)
+            if (!ts || elapsed < 1500) {
+              e.preventDefault();
+              show("error-signup-honeypot");
+              setTs();
+              return;
+            }
+            // Username validation (client-side, server also validates)
+            var uname = signupForm.querySelector('input[name="username"]');
+            if (uname && !/^[a-zA-Z0-9_]{3,20}$/.test(uname.value.trim())) {
+              e.preventDefault();
+              uname.focus();
+              return;
+            }
+            if (signupBtn) {
+              signupBtn.disabled = true;
+              signupBtn.textContent = "Creating…";
+            }
+          });
         }
 
         function applyOsTheme() {

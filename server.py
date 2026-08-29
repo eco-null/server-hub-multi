@@ -369,6 +369,38 @@ class LoginGuard:
 
 guard = LoginGuard()
 
+class RegisterGuard:
+    """Bulk-prevention: max N registrations per IP per window (e.g. 3 per 15 min)."""
+
+    def __init__(self, max_per_window=3, window_seconds=15 * 60):
+        self.max_per_window = max_per_window
+        self.window_seconds = window_seconds
+        self._state = {}
+        self._lock = threading.Lock()
+
+    def is_limited(self, ip):
+        with self._lock:
+            now = time.time()
+            lst = self._state.get(ip, [])
+            lst = [t for t in lst if now - t < self.window_seconds]
+            self._state[ip] = lst
+            return len(lst) >= self.max_per_window
+
+    def record(self, ip):
+        with self._lock:
+            now = time.time()
+            lst = self._state.get(ip, [])
+            lst = [t for t in lst if now - t < self.window_seconds]
+            lst.append(now)
+            self._state[ip] = lst
+
+    def reset(self, ip):
+        with self._lock:
+            self._state.pop(ip, None)
+
+
+register_guard = RegisterGuard(max_per_window=3, window_seconds=15 * 60)
+
 
 # ---- system stats (Linux /proc; returns None when unavailable) ----
 
@@ -1280,8 +1312,12 @@ class HubHandler(BaseHTTPRequestHandler):
             return self.send_bytes("Payload too large", 413, "text/plain; charset=utf-8")
         raw = self.rfile.read(length).decode("utf-8", "replace")
         form = urllib.parse.parse_qs(raw)
-        username = (form.get("username") or [""])[0]
+        # Support new 3-field registration (email, username, password) and old 2-field (username as email)
+        email = (form.get("email") or [""])[0].strip()
+        username = (form.get("username") or [""])[0].strip()
         password = (form.get("password") or [""])[0]
+        website_url = (form.get("website_url") or [""])[0].strip()  # honeypot
+        form_ts = (form.get("form_ts") or [""])[0].strip()
         ip = self.client_ip()
         if guard.is_locked(ip):
             return self.redirect("/login?error=locked")
@@ -1289,10 +1325,49 @@ class HubHandler(BaseHTTPRequestHandler):
         # ---- Supabase multi-user (primary) ----
         if self.server.supabase is not None:
             if path == "/register":
+                # Bulk prevention: honeypot must be empty, timestamp must be 1.5s-1h old, rate limit 3 per 15m
+                if website_url:
+                    return self.redirect("/login?show=signup&error=honeypot")
+                try:
+                    ts = int(form_ts) if form_ts else 0
+                    now_ms = int(time.time() * 1000)
+                    if not ts or now_ms - ts < 1500 or now_ms - ts > 3600000 or ts > now_ms + 5000:
+                        return self.redirect("/login?show=signup&error=honeypot")
+                except:
+                    return self.redirect("/login?show=signup&error=honeypot")
+                if register_guard.is_limited(ip):
+                    return self.redirect("/login?show=signup&error=rate")
+                # Normalize email/username: support old form where username is email
+                if not email and "@" in username:
+                    email = username
+                    username = email.split("@")[0]
+                elif not email:
+                    email = username
+                # Username fallback from email if not provided separately
+                if not username or "@" in username:
+                    username = (email.split("@")[0] if "@" in email else username) or "user"
+                # Validate email, username, password
+                if not re.match(r"^[^@]+@[^@]+\.[^@]+$", email):
+                    guard.record_failure(ip)
+                    return self.redirect("/login?show=signup&error=1")
+                # Username: 3-20 chars, alphanumeric + underscore, not an email
+                if not re.match(r"^[a-zA-Z0-9_]{3,20}$", username):
+                    guard.record_failure(ip)
+                    return self.redirect("/login?show=signup&error=1")
+                if len(password) < 8:
+                    guard.record_failure(ip)
+                    return self.redirect("/login?show=signup&error=1")
+                # Check username not already taken (use SECURITY DEFINER RPC to bypass RLS)
+                try:
+                    if self.server.supabase.username_exists(username):
+                        guard.record_failure(ip)
+                        return self.redirect("/login?show=signup&error=1")
+                except:
+                    pass
                 session = None
                 signup_err = None
                 try:
-                    session = self.server.supabase.sign_up(username or "", password)
+                    session = self.server.supabase.sign_up(email, password, username)
                 except Exception as e:
                     signup_err = e
                     session = None
@@ -1306,17 +1381,15 @@ class HubHandler(BaseHTTPRequestHandler):
                             try:
                                 admin_res = None
                                 try:
-                                    admin_res = self.server.supabase.admin_create_user(username or "", password, username.split("@")[0] if username and "@" in username else username or "")
+                                    admin_res = self.server.supabase.admin_create_user(email, password, username)
                                 except Exception as e:
-                                    # Only try admin for rate-limit or missing session, not for weak password
-                                    # admin_create_user will error for weak password / email exists, so check
                                     if "429" in str(e) or "rate" in str(e).lower():
                                         admin_res = None
                                     else:
                                         admin_res = None
                                 if admin_res and admin_res.get("id"):
                                     try:
-                                        session = self.server.supabase.sign_in(username or "", password)
+                                        session = self.server.supabase.sign_in(email, password)
                                     except Exception:
                                         pass
                             except Exception:
@@ -1326,12 +1399,12 @@ class HubHandler(BaseHTTPRequestHandler):
                             try:
                                 bypass_res = None
                                 try:
-                                    bypass_res = self.server.supabase.signup_bypass(username or "", password, username.split("@")[0] if username and "@" in username else username or "")
+                                    bypass_res = self.server.supabase.signup_bypass(email, password, username)
                                 except Exception:
                                     bypass_res = None
                                 if bypass_res and not bypass_res.get("error"):
                                     try:
-                                        session = self.server.supabase.sign_in(username or "", password)
+                                        session = self.server.supabase.sign_in(email, password)
                                     except Exception:
                                         session = None
                             except Exception:
@@ -1339,16 +1412,17 @@ class HubHandler(BaseHTTPRequestHandler):
                         # If normal signup had no session but user exists (confirmation pending), try sign-in directly
                         if (not session or not session.get("access_token")) and signup_err is None:
                             try:
-                                session = self.server.supabase.sign_in(username or "", password)
+                                session = self.server.supabase.sign_in(email, password)
                             except Exception:
                                 pass
                     except Exception:
                         pass
                 if not session or not session.get("access_token"):
                     guard.record_failure(ip)
-                    # 422 = email taken / weak password; show generic error
+                    # 422 = email taken / weak password / username taken; show generic error
                     return self.redirect("/login?show=signup&error=1")
                 guard.reset(ip)
+                register_guard.record(ip)
                 user = self._supabase_user_from_session(session)
                 token = self.server.sessions.sign(user)
                 return self.redirect("/", {"Set-Cookie": self.session_cookie(token)})
@@ -1385,9 +1459,23 @@ class HubHandler(BaseHTTPRequestHandler):
                 guard.record_failure(ip)
                 return self.redirect("/login?2fa=1&error=totp")
 
-            # ---- login first step (password) ----
+            # ---- login first step (password) - supports email or username ----
+            login_id = (form.get("username") or [""])[0].strip() if form.get("username") else username.strip()
+            # username variable from earlier is already stripped, but for login form it's the same field
+            # If login_id is username (no @), resolve to email via RPC
+            email_for_login = login_id or username
+            if email_for_login and "@" not in email_for_login:
+                try:
+                    resolved = self.server.supabase.get_email_by_username(email_for_login)
+                    # RPC returns text or json, handle both
+                    if isinstance(resolved, str) and "@" in resolved:
+                        email_for_login = resolved
+                    elif isinstance(resolved, dict) and resolved.get("email") and "@" in resolved["email"]:
+                        email_for_login = resolved["email"]
+                except:
+                    pass
             try:
-                session = self.server.supabase.sign_in(username or "", password)
+                session = self.server.supabase.sign_in(email_for_login or "", password)
             except Exception:
                 session = None
             if not session or not session.get("access_token"):
