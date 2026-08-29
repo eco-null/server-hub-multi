@@ -167,8 +167,12 @@
           transform 0.2s var(--ease);
       }
 
+      .hidden {
+        display: none !important;
+      }
+
       .panel.hidden {
-        display: none;
+        display: none !important;
       }
 
       .panel.enter-left {
@@ -224,15 +228,11 @@
         padding: 11px 16px;
         border: 0;
         border-radius: 8px;
-        color: #fff;
+        color: var(--bg);
         cursor: pointer;
         background: var(--text);
         font: 500 0.875rem / 1 Inter, sans-serif;
         transition: opacity 0.15s var(--ease);
-      }
-
-      html.light button[type="submit"] {
-        background: #18181b;
       }
 
       button[type="submit"]:hover {
