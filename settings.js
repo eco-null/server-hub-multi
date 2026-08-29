@@ -244,15 +244,15 @@ const GRID_OVERLAY_DARK = 'linear-gradient(rgba(255,255,255,0.025) 1px, transpar
 const GRID_OVERLAY_LIGHT = 'linear-gradient(rgba(15,23,42,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(15,23,42,0.06) 1px, transparent 1px)';
 
 const GRADIENTS_BASE = {
-  // Elegant dark luxurious — racing green, dark velvet, midnight, carbon
-  aurora: 'linear-gradient(160deg, #0f1a1f 0%, #1a2e1a 100%)',
-  dusk: 'linear-gradient(160deg, #1a0f1f 0%, #2d0a2e 100%)',
-  ocean: 'linear-gradient(160deg, #0a1a2e 0%, #0f2a3a 100%)',
-  forest: 'linear-gradient(160deg, #01411c 0%, #1a472a 100%)',
-  mono: 'linear-gradient(160deg, #0e0e10 0%, #1e1e1e 100%)',
-  grid: 'linear-gradient(160deg, #0a0a0a 0%, #141414 100%)',
-  slate: 'linear-gradient(160deg, #121212 0%, #1f1f1f 100%)',
-  sage: 'linear-gradient(160deg, #0f1a14 0%, #1a2e1a 100%)',
+  // Luxurious dark — racing green, dark velvet, midnight, carbon, no glows
+  aurora: 'linear-gradient(160deg, #0a1f1a 0%, #0f2e1f 100%)',
+  dusk: 'linear-gradient(160deg, #1a0a1a 0%, #2a0f2e 100%)',
+  ocean: 'linear-gradient(160deg, #070f1a 0%, #0a1f33 100%)',
+  forest: 'linear-gradient(160deg, #052e16 0%, #0a3321 100%)',
+  mono: 'linear-gradient(160deg, #0a0a0a 0%, #141414 100%)',
+  grid: 'linear-gradient(160deg, #0a0a0a 0%, #111111 100%)',
+  slate: 'linear-gradient(160deg, #0f0f0f 0%, #1a1a1a 100%)',
+  sage: 'linear-gradient(160deg, #0a1a12 0%, #143322 100%)',
 };
 const LIGHT_GRADIENTS_BASE = {
   aurora: 'linear-gradient(160deg, #e7e5e4 0%, #d6d3d1 100%)',
@@ -303,10 +303,12 @@ function applyWallpaper(s) {
     const wallpaperEl = document.getElementById('wallpaper');
     if (wallpaperEl) {
       if (showGrid) {
-        wallpaperEl.style.backgroundSize = '32px 32px, 32px 32px, auto';
-        if (w.gradient === 'grid') wallpaperEl.style.backgroundSize = '44px 44px, 44px 44px, auto';
+        wallpaperEl.style.backgroundSize = '32px 32px, 32px 32px, cover';
+        wallpaperEl.style.backgroundRepeat = 'repeat, repeat, no-repeat';
+        if (w.gradient === 'grid') wallpaperEl.style.backgroundSize = '44px 44px, 44px 44px, cover';
       } else {
-        wallpaperEl.style.backgroundSize = 'auto';
+        wallpaperEl.style.backgroundSize = 'cover';
+        wallpaperEl.style.backgroundRepeat = 'no-repeat';
       }
     }
     // Light palette gradients are bright → wallpaper-light (light text over
