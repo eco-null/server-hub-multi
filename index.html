@@ -145,6 +145,10 @@
       /* Isolate backdrop sampling to this element's stacking context — prevents
          the blur from re-sampling the entire page on every scroll frame. */
       isolation: isolate;
+      /* Contain layout/paint to reduce invalidation on scroll/resize — no visual change */
+      contain: layout paint style;
+      /* Promote to GPU layer for smooth scrolling — no visual change */
+      transform: translateZ(0);
     }
     .glass:hover { background: var(--surface-hi); border-color: var(--border-hi); }
     .toast {
@@ -155,7 +159,7 @@
       z-index: 60; transition: opacity 200ms var(--ease);
     }
     .toast.hidden { opacity: 0; pointer-events: none; }
-    .card { transition: transform 250ms var(--ease), background-color 250ms var(--ease), border-color 250ms var(--ease), box-shadow 250ms var(--ease); }
+    .card { transition: transform 250ms var(--ease), background-color 250ms var(--ease), border-color 250ms var(--ease), box-shadow 250ms var(--ease); contain: layout paint style; }
     .card:hover {
       transform: translateY(-2px);
       box-shadow: 0 12px 40px -16px var(--accent-glow), 0 0 0 1px var(--border-hi);
@@ -1561,18 +1565,25 @@
   }
   async function pollStats() {
     if (document.hidden) return;
+    const statsSection = document.querySelector('[data-feature="stats"]');
     try {
       const r = await fetchWithRetry('/api/beszel', undefined, 1);
       if (r.ok) {
         const d = await r.json();
         if (d.enabled) {
-          if (d.error) { renderSingleHostFallback(); return; }
+          if (d.error) {
+            // Beszel configured but unreachable — show nothing (avoid IP leak via fallback) or show muted error
+            if (statsSection) statsSection.style.display = 'none';
+            return;
+          }
+          if (statsSection) statsSection.style.display = '';
           renderBeszel(d.systems);
           return;
         }
       }
     } catch {}
-    renderSingleHostFallback();
+    // Beszel not configured — hide System stats entirely to prevent IP/host leak
+    if (statsSection) statsSection.style.display = 'none';
   }
   function formatUptime(sec) {
     if (sec == null || isNaN(sec) || sec < 1) return '';

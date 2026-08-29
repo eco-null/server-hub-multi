@@ -61,7 +61,7 @@ const DEFAULTS = Object.freeze({
     greeting: true,
     stats: true,
     statusPings: true,
-    blobs: true,
+    blobs: false,
     search: true,
     beszelUptime: true,
   },
@@ -247,6 +247,7 @@ const GRADIENTS = {
   ocean: 'radial-gradient(1100px 750px at 20% 15%, #0e4d64 0%, transparent 55%), linear-gradient(160deg, #04121c 0%, #0b2c3d 100%)',
   forest: 'radial-gradient(1000px 700px at 80% 10%, #1a4d2a 0%, transparent 55%), linear-gradient(160deg, #06120a 0%, #0f2a18 100%)',
   mono: 'linear-gradient(160deg, #0a0a0c 0%, #17171a 100%)',
+  grid: 'radial-gradient(900px 520px at 7% 2%, rgba(140,167,255,0.12), transparent 66%), radial-gradient(700px 620px at 100% 100%, rgba(68,95,165,0.12), transparent 65%), linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px), linear-gradient(145deg, #080b12 0%, #101726 100%)',
 };
 
 /* Light-theme gradient palettes — used when the user picked light theme so
@@ -257,6 +258,7 @@ const LIGHT_GRADIENTS = {
   ocean: 'radial-gradient(1100px 750px at 20% 15%, #cffafe 0%, transparent 55%), linear-gradient(160deg, #f0f9ff 0%, #d6f0ff 100%)',
   forest: 'radial-gradient(1000px 700px at 80% 10%, #dcfce7 0%, transparent 55%), linear-gradient(160deg, #f0fdf4 0%, #d9f5e0 100%)',
   mono: 'linear-gradient(160deg, #f8f8fa 0%, #eceef2 100%)',
+  grid: 'radial-gradient(900px 520px at 7% 2%, rgba(73,104,216,0.08), transparent 66%), radial-gradient(700px 620px at 100% 100%, rgba(68,95,165,0.08), transparent 65%), linear-gradient(rgba(15,23,42,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(15,23,42,0.06) 1px, transparent 1px), linear-gradient(145deg, #f2f5fa 0%, #e7edf7 100%)',
 };
 
 const GradientLuminance = { aurora: false, dusk: false, ocean: false, forest: false, mono: false };
@@ -276,6 +278,13 @@ function applyWallpaper(s) {
     const isLightTheme = s && !isDark(s);
     const palette = isLightTheme && LIGHT_GRADIENTS[w.gradient] ? LIGHT_GRADIENTS[w.gradient] : GRADIENTS[w.gradient];
     body.style.setProperty('--wp-image', palette);
+    // Login grid needs special background-size (44px grid), others use cover
+    const wallpaperEl = document.getElementById('wallpaper');
+    if (w.gradient === 'grid' && wallpaperEl) {
+      wallpaperEl.style.backgroundSize = 'auto, auto, 44px 44px, 44px 44px, auto';
+    } else if (wallpaperEl) {
+      wallpaperEl.style.backgroundSize = '';
+    }
     // Light palette gradients are bright → wallpaper-light (light text over
     // blur stays readable); dark palette → wallpaper-dark as before.
     root.classList.add(isLightTheme ? 'wallpaper-light' : 'wallpaper-dark');

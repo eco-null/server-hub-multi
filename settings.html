@@ -694,15 +694,15 @@
   }
 
   async function checkBeszel(showToast) {
-    // Kaydedilmemiş form değerlerini geçici test: server'a formdaki
-    // credentials ile istek at — settings'ten bağımsız doğrulama.
     const testUrl = beszelUrl.value.trim();
+    // Placeholder/example URLs are not real Beszel — treat as not configured without network request
+    const isPlaceholder = !testUrl || testUrl === 'https://beszel.example.com' || testUrl.includes('example.com');
     const msgEl = beszelStatusEl;
     beszelTestBtn.disabled = true;
     msgEl.textContent = 'Checking Beszel…';
     let msg = '';
     try {
-      if (testUrl) {
+      if (testUrl && !isPlaceholder) {
         const r = await fetch('/api/beszel', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -725,13 +725,23 @@
           msg = 'Beszel: not configured';
           setBeszelStatus(msg, 'info');
         }
+      } else if (isPlaceholder && testUrl) {
+        msg = 'Beszel: not configured';
+        setBeszelStatus(msg, 'info');
       } else {
         const r = await fetch('/api/beszel', { cache: 'no-store' });
         const d = await safeJson(r);
         if (!r.ok) throw new Error(d.error || 'request failed (' + r.status + ')');
         if (d.enabled && d.error) {
-          msg = 'Beszel: error — ' + d.error;
-          setBeszelStatus(msg, 'bad');
+          // Server says enabled but unreachable — hide error if user never configured Beszel
+          const isEmptyConfig = !testUrl;
+          if (isEmptyConfig) {
+            msg = 'Beszel: not configured';
+            setBeszelStatus(msg, 'info');
+          } else {
+            msg = 'Beszel: error — ' + d.error;
+            setBeszelStatus(msg, 'bad');
+          }
         } else if (d.enabled) {
           const n = (d.systems || []).length;
           msg = 'Beszel: connected — ' + n + ' server' + (n === 1 ? '' : 's');
@@ -742,8 +752,14 @@
         }
       }
     } catch (err) {
-      msg = 'Beszel: error — ' + err.message;
-      setBeszelStatus(msg, 'bad');
+      // Vercel 500 FUNCTION_INVOCATION_FAILED is HTML, not JSON — treat as not configured when URL is placeholder/empty
+      if (isPlaceholder) {
+        msg = 'Beszel: not configured';
+        setBeszelStatus(msg, 'info');
+      } else {
+        msg = 'Beszel: error — ' + err.message;
+        setBeszelStatus(msg, 'bad');
+      }
     } finally {
       beszelTestBtn.disabled = false;
       if (showToast) toast(msg);
@@ -1236,8 +1252,24 @@
       const oldBmIds  = new Set(((await apiJson('GET', API_BOOKMARKS)).bookmarks || []).map(b => b.id));
       const backupSvcs = Array.isArray(data.services) ? data.services : [];
       const backupBms  = Array.isArray(data.bookmarks) ? data.bookmarks : [];
-      for (const s of backupSvcs) insertedSvc.push(await apiJson('POST', API_SERVICES, s));
-      for (const b of backupBms) insertedBm.push(await apiJson('POST', API_BOOKMARKS, b));
+      // Sanitize backup entries: only send whitelisted fields, let server assign id/user_id
+      for (const s of backupSvcs) {
+        const res = await apiJson('POST', API_SERVICES, {
+          name: s.name, url: s.url, desc: s.desc || '', icon: s.icon || 'box',
+          ping: s.ping !== false, categoryOverride: s.categoryOverride || null
+        });
+        const newId = (res.services || []).find(x => x.name === s.name && x.url === s.url)?.id;
+        if (newId) insertedSvc.push({ id: newId });
+        else insertedSvc.push(res);
+      }
+      for (const b of backupBms) {
+        const res = await apiJson('POST', API_BOOKMARKS, {
+          name: b.name, url: b.url, icon: b.icon || 'link', color: b.color || ''
+        });
+        const newId = (res.bookmarks || []).find(x => x.name === b.name && x.url === b.url)?.id;
+        if (newId) insertedBm.push({ id: newId });
+        else insertedBm.push(res);
+      }
       deleting = true;
       // Delete only items that existed before the import (the POSTs assign new
       // ids, so we must not touch the freshly inserted rows).
@@ -1252,8 +1284,8 @@
       } else if (insertedSvc.length || insertedBm.length) {
         // an insert failed; remove the ones already inserted (best-effort), keep originals
         try {
-          for (const s of insertedSvc) await apiJson('DELETE', API_SERVICES + '/' + encodeURIComponent(s.id));
-          for (const b of insertedBm) await apiJson('DELETE', API_BOOKMARKS + '/' + encodeURIComponent(b.id));
+          for (const s of insertedSvc) if (s.id) await apiJson('DELETE', API_SERVICES + '/' + encodeURIComponent(s.id));
+          for (const b of insertedBm) if (b.id) await apiJson('DELETE', API_BOOKMARKS + '/' + encodeURIComponent(b.id));
           toast('Import failed: ' + msg + ' — originals kept, partial imports rolled back');
         } catch (rollbackErr) {
           toast('Import failed: ' + msg + ' (partial cleanup failed: ' + rollbackErr.message + ')');

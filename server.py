@@ -403,34 +403,59 @@ register_guard = RegisterGuard(max_per_window=3, window_seconds=15 * 60)
 
 
 # ---- system stats (Linux /proc; returns None when unavailable) ----
+# Cached CPU reading to avoid blocking the request handler with sleep(0.1)
+_cpu_cache = {"a": None, "b": None, "val": None, "ts": 0}
+_cpu_lock = threading.Lock()
+
+def _read_cpu():
+    try:
+        with open("/proc/stat") as f:
+            for line in f:
+                if line.startswith("cpu "):
+                    nums = [int(x) for x in line.split()[1:]]
+                    if len(nums) < 4:
+                        return None
+                    idle = nums[3] + (nums[4] if len(nums) > 4 else 0)
+                    return sum(nums), idle
+    except (OSError, ValueError):
+        return None
+    return None
 
 def cpu_percent():
-    """Overall CPU usage percent (0-100) from two /proc/stat samples."""
-
-    def read():
-        try:
-            with open("/proc/stat") as f:
-                for line in f:
-                    if line.startswith("cpu "):
-                        nums = [int(x) for x in line.split()[1:]]
-                        if len(nums) < 4:
-                            return None
-                        idle = nums[3] + (nums[4] if len(nums) > 4 else 0)
-                        return sum(nums), idle
-        except (OSError, ValueError):
+    """Overall CPU usage percent (0-100) from two /proc/stat samples, non-blocking via cache."""
+    now = time.time()
+    with _cpu_lock:
+        # If cache is fresh (<1.5s), return it without blocking
+        if _cpu_cache["val"] is not None and now - _cpu_cache["ts"] < 1.5:
+            return _cpu_cache["val"]
+        a = _read_cpu()
+        if not a:
             return None
-        return None
-
-    a = read()
-    time.sleep(0.1)
-    b = read()
-    if not a or not b:
-        return None
-    total_delta = b[0] - a[0]
-    idle_delta = b[1] - a[1]
-    if total_delta <= 0:
-        return None
-    return round(100 * (1 - idle_delta / total_delta))
+        # If we have a previous 'a', compute delta without sleep by using stored previous
+        prev_a = _cpu_cache["a"]
+        prev_b = _cpu_cache["b"]
+        # Store current as next 'a' for next call
+        _cpu_cache["a"] = a
+        if prev_a is None:
+            # First call: need second sample, but do it without blocking the handler by
+            # returning None once and letting next poll (1.5s later) compute it.
+            # For immediate value, do a very short non-blocking second read after 0.02s in background thread
+            # Instead, fallback to single-sample estimate: use /proc/loadavg as proxy or return None
+            # We choose to return None for first hit and let next call compute, but for UX we try a quick second read
+            # with minimal sleep in a thread-safe way that doesn't block the main handler via double-read cache
+            _cpu_cache["b"] = a
+            _cpu_cache["ts"] = now
+            return None
+        # Compute with previous and current
+        total_delta = a[0] - prev_a[0]
+        idle_delta = a[1] - prev_a[1]
+        if total_delta <= 0:
+            _cpu_cache["val"] = None
+        else:
+            _cpu_cache["val"] = round(100 * (1 - idle_delta / total_delta))
+        _cpu_cache["ts"] = now
+        _cpu_cache["b"] = a
+        return _cpu_cache["val"]
 
 
 def mem_percent():
@@ -462,13 +487,23 @@ def disk_percent(path="/"):
     return round(100 * used / total)
 
 
-def stats_payload():
+_host_cache = {"host": None, "ts": 0}
+
+def _get_host():
+    now = time.time()
+    if _host_cache["host"] is not None and now - _host_cache["ts"] < 300:
+        return _host_cache["host"]
     try:
         with open("/etc/hostname") as f:
             host = f.read().strip() or socket.gethostname()
     except OSError:
         host = socket.gethostname()
-    return {"host": host, "cpu": cpu_percent(), "mem": mem_percent(), "disk": disk_percent()}
+    _host_cache["host"] = host
+    _host_cache["ts"] = now
+    return host
+
+def stats_payload():
+    return {"host": _get_host(), "cpu": cpu_percent(), "mem": mem_percent(), "disk": disk_percent()}
 
 
 # ---- Beszel multi-server stats proxy ----
@@ -612,6 +647,14 @@ def _beszel_systems(cfg=None):
         cfg = read_beszel_env()
     if not cfg or not cfg.get("url"):
         return None
+    # Treat placeholder/example URL as not configured (prevents 500 on settings test)
+    placeholder_hosts = ("beszel.example.com", "example.com")
+    try:
+        host = urllib.parse.urlparse(cfg["url"]).netloc.lower()
+        if any(ph in host for ph in placeholder_hosts):
+            return None
+    except:
+        pass
     now = time.time()
     cache_key = json.dumps(cfg, sort_keys=True)
     with _beszel_cache_lock:
@@ -1145,8 +1188,15 @@ class HubHandler(BaseHTTPRequestHandler):
         }
         if not cfg["url"]:
             return self.send_bytes(
-                json.dumps({"enabled": False, "error": "url required"}), 200,
+                json.dumps({"enabled": False}), 200,
                 "application/json; charset=utf-8")
+        # Placeholder/example URL is not a real Beszel — treat as not configured
+        try:
+            _host = urllib.parse.urlparse(cfg["url"]).netloc.lower()
+            if "beszel.example.com" in _host or _host == "example.com" or "example.com" in _host:
+                return self.send_bytes(json.dumps({"enabled": False}), 200, "application/json; charset=utf-8")
+        except:
+            pass
         try:
             systems = _beszel_systems(cfg)
         except Exception:
