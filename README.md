@@ -5,208 +5,188 @@
 <h1 align="center">Server Hub</h1>
 
 <p align="center">
-  A self-hosted dashboard for your applications and services — one page, no build step, zero third-party dependencies.
+  A focused, self-hosted dashboard for the applications and services you use every day.
   <br>
   <a href="#features">Features</a> · <a href="#quick-start">Quick Start</a> · <a href="#configuration">Configuration</a> · <a href="#api">API</a> · <a href="#testing">Testing</a>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/python-%3E%3D3.8-5E6AD2" alt="Python >=3.8">
-  <img src="https://img.shields.io/badge/dependencies-0-22C55E" alt="Zero dependencies">
-  <img src="https://img.shields.io/badge/tests-181%20client%20%2B%2043%20server-22C55E" alt="Tests: 224 passing">
+  <img src="https://img.shields.io/badge/Python-3.8%2B-5E6AD2" alt="Python 3.8 or newer">
+  <img src="https://img.shields.io/badge/runtime-stdlib%20only-22C55E" alt="Python standard library only">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License">
 </p>
 
 ---
 
-Server Hub turns a list of links into a searchable, auto-categorized homepage served by a single-file Python server (stdlib only). It runs anywhere Python 3 is available — a small VPS, an LXC container, or Docker — with a minimal memory footprint.
+Server Hub brings self-hosted applications, infrastructure tools, and frequently used links into one private homepage. It combines a lightweight Python backend with a static frontend: there is no frontend build pipeline and no package installation required for the server.
 
-There is no frontend build step and no npm/node toolchain: the whole dashboard is a static `index.html` that talks to one small HTTP server.
+The project supports two deployment models:
+
+- **Vercel + Supabase** for a serverless, multi-user deployment with per-user data isolation.
+- **Standalone Python** for a simple single-user installation on a VPS, Proxmox LXC, or another Linux host.
 
 ## Features
 
-- **Adaptive layout** — Two-column dashboard on desktop (content left, sidebar right); service cards and category groups resize to content so the page stays compact.
-- **Auto-categorization** — Services are grouped into 23 categories by keyword rules. No API key, no external service.
-- **Search** — Fullscreen search overlay with live service suggestions; pressing Enter runs a web search (Google, DuckDuckGo, Bing, SearXNG, or Startpage) in a new tab.
-- **Bookmarks** — A dedicated sidebar section for frequently used links, with optional per-link dot colors. Server-persisted.
-- **Wallpapers** — Choose no background, a bundled gradient, or a custom image URL. The dashboard samples the image's brightness and adjusts glass/text contrast for readability. Wallpaper changes are smooth and viewport-locked, so adding services or navigating never re-zooms it.
-- **Beszel integration** — Optional multi-server CPU / memory / disk monitoring by proxying a [Beszel](https://github.com/henrygd/beszel) hub. Falls back to single-host stats when unconfigured.
-- **Status pings** — Best-effort health checks per service (up / down / checking), disableable per link.
-- **System stats** — CPU / memory / disk usage bars from the host.
-- **Links** — Add, edit, and delete links from the dashboard or settings. Stored server-side in `services.json`, shared across devices.
-- **Personalization** — Page title, subtitle, greeting name, accent color, default domain, per-feature toggles. Persisted in `localStorage`.
-- **Backup & restore** — Export settings, links, and bookmarks to a JSON file; import to restore.
-- **Authentication** — Single-user login with an `HttpOnly` session cookie and per-IP brute-force lockout.
+- **Personal dashboard** — responsive service cards, category sections, bookmarks, clock, greeting, page title, and subtitle.
+- **Search** — filter services instantly and optionally send a query to Google, DuckDuckGo, Bing, Startpage, or a configured SearXNG instance.
+- **Automatic categorization** — services are categorized locally from their name, URL, and description, with manual overrides when needed.
+- **Service management** — add, edit, delete, reorder, and configure health pings for links from the dashboard or Settings.
+- **Bookmarks** — manage a compact set of frequently used links with optional colors and icons.
+- **Themes and wallpapers** — light, dark, or automatic theme; built-in gradients; custom image URLs; and contrast adjustments for readability.
+- **System monitoring** — local CPU, memory, and disk statistics, plus optional multi-server monitoring through [Beszel](https://github.com/henrygd/beszel).
+- **Multi-user accounts** — Supabase Auth registration/login with user-specific settings, services, bookmarks, and logs protected by Postgres RLS.
+- **Two-factor authentication** — optional TOTP protection using an authenticator app.
+- **Backup and restore** — export and import settings, services, and bookmarks as JSON.
+- **Security controls** — signed `HttpOnly` sessions, CSRF checks, rate limiting, request-size limits, security headers, and path-traversal protection.
 
 ## Quick Start
 
-### Docker (recommended)
+### Vercel + Supabase (multi-user)
 
-Use the prebuilt image and CasaOS-ready compose file from the **[server-hub-docker](https://github.com/eco-null/server-hub-docker)** repository:
+1. Create a Supabase project.
+2. Run [`supabase-schema.sql`](supabase-schema.sql) once in the Supabase SQL Editor.
+3. Import this repository into Vercel.
+4. Add the environment variables described in [Configuration](#configuration).
+5. Deploy and open the resulting Vercel URL.
 
-```bash
-git clone https://github.com/eco-null/server-hub-docker.git
-cd server-hub-docker
+Vercel uses [`api/index.py`](api/index.py) as the Python Function entry point. It adapts the existing backend to Vercel’s WSGI runtime, while static assets are served through the same application.
 
-# 1. Set a strong password in docker-compose.yml (HUB_PASSWORD)
-# 2. Start it
-docker compose up -d
-```
+> Keep `SUPABASE_SERVICE_ROLE_KEY` private. It is only used by the server for administrative signup and must never be exposed to browser code.
 
-Open `http://<host>:8643` and sign in at `/login`. The container runs non-root, stores data on the host, and reports the host's CPU / memory / disk stats.
-
-> **CasaOS:** Apps → Custom App → paste the compose file → set `HUB_USER` / `HUB_PASSWORD` → install. The image `ghcr.io/eco-null/server-hub:latest` is pulled automatically.
-
-### Bare metal (Python 3)
+### Standalone Python (single-user)
 
 ```bash
-git clone https://github.com/eco-null/server-hub.git
-cd server-hub
+git clone https://github.com/eco-null/server-hub-multi.git
+cd server-hub-multi
 HUB_PASSWORD=change-me python3 server.py
 ```
 
-Open <http://localhost:8642> — sign in at `/login`, then use the dashboard.
+Open <http://localhost:8642> and sign in with the configured username and password. For a persistent Proxmox LXC deployment, see [`SETUP-LXC.md`](SETUP-LXC.md).
 
 ## Configuration
 
-Configuration is via environment variables. `HUB_PASSWORD` is required; the server refuses to start without it.
+Configuration is provided through environment variables. With Supabase variables present, Server Hub runs in multi-user mode. Without them, it falls back to single-user authentication.
 
 | Variable | Default | Description |
 |---|---|---|
-| `HUB_USER` | `admin` | Sign-in username. |
-| `HUB_PASSWORD` | — (required) | Sign-in password. |
-| `HUB_PORT` | `8642` | Listen port. |
-| `HUB_HOST` | `0.0.0.0` | Bind address. |
-| `BESZEL_URL` | *(empty)* | Beszel hub URL, e.g. `http://beszel:9520`. Empty disables multi-server stats. |
-| `BESZEL_USER` | *(empty)* | Beszel account name used to fetch system stats. |
+| `SUPABASE_URL` | *(empty)* | Supabase project URL; enables multi-user mode when paired with `SUPABASE_ANON_KEY`. |
+| `SUPABASE_ANON_KEY` | *(empty)* | Supabase publishable/anon key used for Auth and RLS-scoped requests. |
+| `SUPABASE_SERVICE_ROLE_KEY` | *(empty)* | Optional server-only key for administrative signup flows. Never expose it publicly. |
+| `SUPABASE_SERVICE_KEY` | *(empty)* | Backward-compatible alias for the service-role key. |
+| `HUB_USER` | `admin` | Username in standalone single-user mode. |
+| `HUB_PASSWORD` | — | Required in standalone mode; use a strong password. |
+| `SESSION_SECRET` | *(generated locally)* | Stable signing key for sessions. **Required on Vercel** so sessions survive across instances. |
+| `HUB_HOST` | `0.0.0.0` | Bind address for standalone mode. |
+| `HUB_PORT` | `8642` | Listen port for standalone mode. |
+| `HUB_DISK_PATH` | `/` | Filesystem path used for the local disk widget. Set to `/host` when the container exposes the host root there. |
+| `BESZEL_URL` | *(empty)* | Optional Beszel hub URL, for example `http://beszel:9520`. |
+| `BESZEL_USER` | *(empty)* | Beszel account used by the server-side proxy. |
 | `BESZEL_PASSWORD` | *(empty)* | Beszel account password. |
-| `HUB_DISK_PATH` | `/` | Filesystem path read for the disk widget (Docker sets `/host` = host root). |
 
-Generate a strong password with `openssl rand -base64 24`.
+Generate secrets with:
 
-## Beszel Multi-Server Stats
+```bash
+openssl rand -base64 32
+```
 
-Set `BESZEL_URL`, `BESZEL_USER`, and `BESZEL_PASSWORD` to monitor every server registered in your Beszel hub. Server Hub authenticates with Beszel's PocketBase API and renders per-system CPU / memory / disk bars, status, and uptime in the sidebar, refreshed every 15 seconds.
+### Supabase setup
 
-The Beszel account must be a member of the systems you want to see (add it in the Beszel UI, or enable `SHARE_ALL_SYSTEMS` on the hub). When Beszel is unconfigured or unreachable, the dashboard falls back to the single-host `/api/stats` widget.
+The schema creates the following tables and policies:
 
-## Multi-User Authentication (Supabase)
+- `profiles` — user profile and unique username.
+- `user_settings` — per-user dashboard settings and layout.
+- `user_services` and `user_bookmarks` — per-user links and bookmarks.
+- `user_logs` — per-user frontend error and conflict logs.
+- Row Level Security policies that restrict every record to its owning `auth.uid()`.
+- A signup trigger that creates the initial profile and settings row.
 
-Server Hub supports two auth modes. The default single-user env auth remains
-fully supported as a fallback; set `SUPABASE_URL` + `SUPABASE_ANON_KEY` to
-enable **multi-user mode** with per-user data isolation (RLS).
+Passwords remain in Supabase Auth. Server Hub passes the signed-in user’s token through to the database API; it does not share data between users.
 
-| Variable | Default | Description |
-|---|---|---|
-| `SUPABASE_URL` | *(empty)* | e.g. `https://xxxx.supabase.co` — enables multi-user |
-| `SUPABASE_ANON_KEY` | *(empty)* | Publishable anon key (not secret; RLS-scoped) |
+### Beszel monitoring
 
-### Schema setup (one-time)
-
-Run `supabase-schema.sql` in the Supabase SQL Editor. It creates:
-
-- `profiles` — `auth.users` 1:1, unique username
-- `user_settings` — per-user `settings` + `layout` (JSONB) — dashboard personalization
-- `user_services`, `user_bookmarks` — per-user services/bookmarks (was global `services.json`)
-- `user_logs` — per-user **error/conflict logs** (`ERROR` / `WARN` / `CONFLICT` only)
-- Row Level Security on every table (`auth.uid() = user_id`) — users can only see/edit their own rows
-- `on_auth_user_created` trigger — auto-creates profile + settings row on signup
-
-### Notes
-
-- Data isolation is enforced by **PostgREST RLS**: the server proxies every data
-  request with the user's own JWT (`Authorization: Bearer`), so a user can never
-  read or mutate another user's rows (verified in tests).
-- Passwords never touch Server Hub: Supabase Auth stores them (bcrypt).
-- Built-in brute-force protection: Supabase rate-limits `/auth/v1/token`
-  (1800 req/h/IP). A per-IP `LoginGuard` (5 attempts → 60 s lockout) adds a
-  local first line of defense.
-- CSRF: all mutating requests are same-origin checked (`Origin` /
-  `Sec-Fetch-Site`); session cookie is `HttpOnly; SameSite=Lax` (+ `Secure`
-  when behind HTTPS via `X-Forwarded-Proto`).
-- Security headers are sent on every response: `nosniff`, `SAMEORIGIN`,
-  `no-referrer`, and a `Content-Security-Policy`.
-- Frontend errors are captured and written to the user's own `user_logs`
-  (`/api/logs`), so per-user error history is separate by design.
+Set `BESZEL_URL`, `BESZEL_USER`, and `BESZEL_PASSWORD` to show CPU, memory, disk, status, and uptime for systems visible to that Beszel account. The dashboard refreshes this data periodically. If Beszel is unavailable or not configured, the local `/api/stats` widget remains available where the host exposes Linux `/proc` statistics.
 
 ## API
 
-All endpoints return JSON and require an active session cookie, except `POST /login` and `POST /register`.
+All API endpoints require an authenticated session unless noted otherwise. Mutating requests must be same-origin.
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/login` | Sign in; sets a 30-day `HttpOnly` session cookie. |
-| `POST` | `/register` | Create account (multi-user mode). |
-| `GET` | `/api/services` | List services (current user). |
-| `POST` | `/api/services` | Create a service. |
-| `PUT` | `/api/services/<id>` | Update a service. |
-| `DELETE` | `/api/services/<id>` | Delete a service. |
-| `GET` | `/api/bookmarks` | List bookmarks (current user). |
-| `POST` | `/api/bookmarks` | Create a bookmark. |
-| `PUT` | `/api/bookmarks/<id>` | Update a bookmark. |
-| `DELETE` | `/api/bookmarks/<id>` | Delete a bookmark. |
-| `GET` | `/api/settings` | Read user settings/layout (multi-user). |
-| `PUT` | `/api/settings` | Save user settings/layout (multi-user). |
-| `GET` | `/api/logs` | List current user's error/conflict logs. |
-| `POST` | `/api/logs` | Log a frontend error for the current user. |
-| `GET` | `/api/beszel` | Multi-server stats from Beszel (proxy). |
-| `GET` | `/api/stats` | Single-host stats: `{ host, cpu, mem, disk }` (Linux `/proc`). |
-| `GET` | `/api/me` | Current session user (email, username, user_id). |
+| `POST` | `/login` | Sign in; supports username/email and the second TOTP step. |
+| `POST` | `/register` | Create a Supabase account. |
+| `GET` | `/logout` | End the current session. |
+| `GET` | `/api/me` | Return the current user. |
+| `GET/POST` | `/api/services` | List or create services. |
+| `PUT/DELETE` | `/api/services/<id>` | Update or delete a service. |
+| `GET/POST` | `/api/bookmarks` | List or create bookmarks. |
+| `PUT/DELETE` | `/api/bookmarks/<id>` | Update or delete a bookmark. |
+| `GET/PUT` | `/api/settings` | Read or save settings and layout. |
+| `GET/POST` | `/api/logs` | Read or record frontend error/conflict logs. |
+| `GET` | `/api/stats` | Return local host CPU, memory, and disk statistics. |
+| `GET/POST` | `/api/beszel` | Read Beszel systems or test the configured connection. |
+| `GET` | `/api/2fa/setup` | Create a pending TOTP setup payload. |
+| `POST` | `/api/2fa/enable` | Enable TOTP after code verification. |
+| `POST` | `/api/2fa/disable` | Disable TOTP after code verification. |
 
-Service object: `{ id, name, url, description, icon, ping, categoryOverride }`. Bookmark object: `{ id, name, url, icon, color }`. Request bodies are capped at 64 KB.
+Service objects use `{ id, name, url, description, icon, ping, categoryOverride }`. Bookmark objects use `{ id, name, url, icon, color }`. JSON request bodies are limited to 64 KiB.
 
 ## Project Structure
 
 | File | Purpose |
 |---|---|
-| `index.html` | Dashboard — layout, service grid, search, pings, clock, stats, bookmarks, wallpapers, CRUD, frontend error reporting. |
-| `settings.html` | Settings page — theme, accent, wallpaper, features, link/bookmark editors, backup, Beszel status. |
-| `login.html` | Login page. |
-| `register.html` | Account creation page (multi-user mode). |
-| `settings.js` | Shared settings layer (`localStorage` + server sync) and wallpaper application. |
-| `categorize.js` | Category keyword rules and matcher. |
-| `server.py` | Auth (Supabase + legacy), static serving, per-user services/bookmarks/settings/logs CRUD, stats, Beszel proxy. |
-| `auth.py` | Supabase Auth + PostgREST client (stdlib only). |
-| `supabase-schema.sql` | One-time multi-user schema (tables + RLS + trigger). |
-| `test_server.py` | Server test suite (52 tests: legacy + security + Supabase mode). |
-| `tests.html` | Browser test suite (181 assertions). |
-| `SETUP-LXC.md` | Proxmox LXC deployment guide. |
-| `SETUP.md` | Cloudflare Access guide for public domains. |
+| `index.html` | Main dashboard, search, service/bookmark editors, pings, stats, and frontend error reporting. |
+| `settings.html` | Theme, wallpaper, feature toggles, Beszel, 2FA, link management, and backup/restore. |
+| `login.html` | Combined sign-in and account creation interface, including the TOTP step. |
+| `register.html` | Compatibility entry point for the registration route. |
+| `settings.js` | Shared settings persistence, local storage, server synchronization, and wallpaper handling. |
+| `categorize.js` | Local category keyword rules and matcher. |
+| `server.py` | Standalone HTTP server, authentication, API routes, persistence, statistics, and Beszel proxy. |
+| `api/index.py` | Vercel WSGI bridge for the Python server. |
+| `auth.py` | Dependency-free Supabase Auth and PostgREST client. |
+| `supabase-schema.sql` | Supabase tables, RLS policies, triggers, and signup helper functions. |
+| `services.json` | Standalone-mode service/bookmark storage; the checked-in file starts empty. |
+| `test_server.py` | Python integration and security test suite. |
+| `tests.html` | Browser-side test suite. |
+| `SETUP-LXC.md` | Proxmox LXC and systemd deployment guide. |
+| `SETUP.md` | Cloudflare Access and public-domain hardening guide. |
 
 ## Testing
 
-```bash
-# Server suite
-python3 -m unittest test_server
+Run the server suite with:
 
-# Browser suite — serve and open in a browser
-python3 -m http.server 8000
-# http://localhost:8000/tests.html
+```bash
+python3 -m unittest test_server
 ```
 
-A green `ALL GREEN` summary means all assertions passed: 43 server tests and 181 client assertions.
+For the browser suite, serve the repository over HTTP and open `tests.html`:
 
-## Deployment
+```bash
+python3 -m http.server 8000
+```
 
-- **Docker / CasaOS** — the official image and compose file live in [server-hub-docker](https://github.com/eco-null/server-hub-docker).
-- **Proxmox LXC** — see [`SETUP-LXC.md`](SETUP-LXC.md) for a systemd-based deployment in ~5 minutes.
-- **Cloudflare Access** — see [`SETUP.md`](SETUP.md) to put SSO in front of a public domain.
+Then visit <http://localhost:8000/tests.html>. Serving over HTTP is important because browsers may restrict `localStorage` on `file://` URLs.
+
+## Deployment Notes
+
+- **Vercel** — use the included [`vercel.json`](vercel.json), set `SESSION_SECRET`, and configure Supabase variables.
+- **Proxmox LXC** — follow [`SETUP-LXC.md`](SETUP-LXC.md) for a systemd service and persistent `services.json`.
+- **Cloudflare Access** — follow [`SETUP.md`](SETUP.md) when placing an additional edge authentication layer in front of a public deployment.
 
 ## Security
 
-- Credentials are read from environment variables at startup; nothing is shipped in the repo.
-- `HttpOnly` session cookies (30-day TTL), per-IP lockout after 5 failed attempts (60 s).
-- Request body size limits (64 KB) on login and API routes.
-- Only `/login` is public; all other routes return `401` until signed in.
-- Beszel credentials are server-side environment variables only — never exposed to the browser.
-- The Docker image runs as a non-root user and drops privileges before starting the server.
+- Supabase mode isolates user data with Postgres RLS.
+- Sessions use signed cookies with `HttpOnly`, `SameSite=Lax`, and `Secure` when HTTPS is detected.
+- Passwords are handled by Supabase Auth in multi-user mode and are read from environment variables in standalone mode.
+- Login and registration include per-IP rate limiting; API and login request bodies are capped at 64 KiB.
+- Mutating requests enforce same-origin checks, and responses include `nosniff`, `SAMEORIGIN`, `no-referrer`, and CSP-related protections.
+- Beszel credentials and TOTP secrets are kept server-side and are not returned to the browser.
 
 ## Known Limitations
 
-- Links and bookmarks are stored in `services.json` on the server; the server must be running to add, edit, or delete.
-- Sessions are held in memory; restarting `server.py` signs everyone out.
-- Single-host stats read `/proc` and are Linux-only (bars render as `—` elsewhere). Beszel multi-server stats have no such dependency.
-- `file://` preview cannot persist settings (browsers block `localStorage` on opaque origins). Serve over HTTP.
+- Standalone-mode sessions are held in memory; restarting `server.py` signs users out.
+- Standalone-mode links and bookmarks are persisted in `services.json`; back up this file with the deployment.
+- Local system statistics depend on Linux `/proc`; use Beszel for cross-host monitoring.
+- The default frontend loads Tailwind, fonts, QRCode.js, and optional wallpaper assets from CDNs. A network-restricted deployment should vendor or replace these assets.
 
 ## License
 
