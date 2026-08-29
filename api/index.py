@@ -13,6 +13,7 @@ plain WSGI response, instead of trying to parse raw HTTP bytes.
 import io
 import os
 import sys
+import threading
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
@@ -28,12 +29,23 @@ if _supa_url and _supa_key:
     import auth  # noqa: E402
     _supa = auth.SupabaseClient(_supa_url, _supa_key, _supa_service or None)
 
-_shared = hub_server.create_server(
-    "127.0.0.1", int(os.environ.get("HUB_PORT", "8642")),
-    user=os.environ.get("HUB_USER", "admin"),
-    password=os.environ.get("HUB_PASSWORD", ""),
-    supabase=_supa,
-)
+# CRIT-05: catch SystemExit when HUB_PASSWORD empty and no Supabase URL
+# (Vercel cold start would 500 on every request otherwise)
+_shared = None
+_shared_error = None
+try:
+    _shared = hub_server.create_server(
+        "127.0.0.1", int(os.environ.get("HUB_PORT", "8642")),
+        user=os.environ.get("HUB_USER", "admin"),
+        password=os.environ.get("HUB_PASSWORD", ""),
+        supabase=_supa,
+    )
+except SystemExit as e:
+    _shared_error = str(e)
+    _shared = None
+except Exception as e:
+    _shared_error = str(e)
+    _shared = None
 
 
 class _WrappedHandler(hub_server.HubHandler):
@@ -44,19 +56,22 @@ class _WrappedHandler(hub_server.HubHandler):
         super().__init__(*args, **kwargs)
 
 
-# Per-request capture state (set inside application()).
-_capture = {"status": 200, "headers": [], "body": b""}
+# CRIT-02: thread-safe capture via thread-local (was module-global dict)
+_local = threading.local()
 
-# Cold-start retry counter (per container, not per request).
-_retried = {"once": False}
-
+def _get_capture():
+    return getattr(_local, "capture", None)
 
 def _capture_send_response(status, message=None):
-    _capture["status"] = status
+    cap = _get_capture()
+    if cap is not None:
+        cap["status"] = status
 
 
 def _capture_send_header(keyword, value):
-    _capture["headers"].append((keyword, str(value)))
+    cap = _get_capture()
+    if cap is not None:
+        cap["headers"].append((keyword, str(value)))
 
 
 def _capture_end_headers():
@@ -64,10 +79,12 @@ def _capture_end_headers():
 
 
 class _CaptureBody(io.BytesIO):
-    """Writes body bytes into _capture as well."""
+    """Writes body bytes into thread-local capture."""
 
     def write(self, data):
-        _capture["body"] += data
+        cap = _get_capture()
+        if cap is not None:
+            cap["body"] += data
         return len(data) if hasattr(data, "__len__") else 0
 
 
@@ -84,6 +101,15 @@ def _build_handler(environ, body):
             headers[key[5:].replace("_", "-").title()] = value
     if "CONTENT_TYPE" in environ:
         headers["Content-Type"] = environ["CONTENT_TYPE"]
+    # CRIT-01: forward Content-Length so HubHandler.do_POST reads body correctly
+    # WSGI provides CONTENT_LENGTH separately; without this header handler reads 0 bytes.
+    clen = environ.get("CONTENT_LENGTH")
+    if clen is not None and str(clen).strip() != "":
+        headers["Content-Length"] = str(clen)
+    elif body:
+        headers["Content-Length"] = str(len(body))
+    else:
+        headers["Content-Length"] = "0"
 
     handler = _WrappedHandler.__new__(_WrappedHandler)
     handler.client_address = (environ.get("REMOTE_ADDR", "127.0.0.1"), 0)
@@ -105,9 +131,17 @@ def _build_handler(environ, body):
 
 
 def application(environ, start_response):
-    _capture["status"] = 200
-    _capture["headers"] = []
-    _capture["body"] = b""
+    # CRIT-05: if shared failed to init, return 500 config error
+    if _shared is None:
+        msg = _shared_error or "server not configured"
+        body = ('{"error":"config: %s"}' % msg).encode("utf-8")
+        start_response("500 Internal Server Error", [("Content-Type", "application/json"), ("Content-Length", str(len(body)))])
+        return [body]
+
+    # CRIT-02: per-request capture (thread-local) + per-request retry flag
+    _local.capture = {"status": 200, "headers": [], "body": b""}
+    capture = _local.capture
+    retried = False
 
     content_length = int(environ.get("CONTENT_LENGTH") or 0)
     body = environ["wsgi.input"].read(content_length) if content_length > 0 else b""
@@ -122,40 +156,40 @@ def application(environ, start_response):
         do_method = "do_" + environ.get("REQUEST_METHOD", "GET").upper()
         getattr(handler, do_method)()
     except Exception as e:
-        # send_bytes already captured a status for handled errors; if the
-        # process died before writing anything, report 500.
         import traceback
         sys.stderr.write("WSGI_EXC [%s %s]: %r\n" % (environ.get("REQUEST_METHOD"), environ.get("PATH_INFO"), e))
         traceback.print_exc(file=sys.stderr)
         # One automatic retry for transient serverless cold-start failures.
         # First request in a fresh container can hit Supabase before the
         # connection pool is warm — retrying once inside the same invocation
-        # avoids a user-visible 500. Only for safe GET/HEAD paths.
-        if environ.get("REQUEST_METHOD") in ("GET", "HEAD") and not _retried.get("once", False):
-            _retried["once"] = True
-            _capture["status"] = 200; _capture["headers"] = []; _capture["body"] = b""
+        # avoids a user-visible 500. Only for safe GET/HEAD paths, per-request.
+        if environ.get("REQUEST_METHOD") in ("GET", "HEAD") and not retried:
+            retried = True
+            _local.capture = {"status": 200, "headers": [], "body": b""}
+            capture = _local.capture
             try:
                 handler2 = _build_handler(environ, body)
                 handler2.send_response = _capture_send_response
                 handler2.send_header = _capture_send_header
                 handler2.end_headers = _capture_end_headers
                 getattr(handler2, do_method)()
+                capture = _local.capture
             except Exception as e2:
                 sys.stderr.write("WSGI_EXC2 [%s]: %r\n" % (environ.get("PATH_INFO"), e2))
                 traceback.print_exc(file=sys.stderr)
-        if _capture["status"] == 200 and not _capture["body"]:
-            _capture["status"] = 500
-            _capture["body"] = b'{"error":"internal"}'
+        cap = _get_capture()
+        if cap and cap["status"] == 200 and not cap["body"]:
+            cap["status"] = 500
+            cap["body"] = b'{"error":"internal"}'
+            capture = cap
 
     # Static fallback: Vercel static build'leri devre dışıysa (legacy builds
     # config'i) statik dosyaları WSGI üzerinden server.serve_file ile ver.
-    # send_bytes zaten security headers içerir — yani CSP/nosniff/X-Frame
-    # statik yanıtlarda da mevcut olur.
-    if _capture["status"] == 200 and not _capture["body"] and environ.get("REQUEST_METHOD") == "GET":
+    capture = _get_capture()
+    if capture and capture["status"] == 200 and not capture["body"] and environ.get("REQUEST_METHOD") == "GET":
         rel = (environ.get("PATH_INFO", "/") or "/").lstrip("/")
         if rel == "":
             rel = "index.html"
-        # Sadece bilinen statik dosyalar (path traversal önleme server'da var)
         if os.path.isfile(os.path.join(hub_server.WEB_ROOT, rel)):
             try:
                 handler.path = "/" + rel
@@ -164,32 +198,30 @@ def application(environ, start_response):
                 handler.send_header = _capture_send_header
                 handler.end_headers = _capture_end_headers
                 handler.serve_file(rel)
+                capture = _get_capture()
             except Exception:
-                if _capture["status"] == 200 and not _capture["body"]:
-                    _capture["status"] = 404
-                    _capture["body"] = b"Not found"
-            if _capture["status"] == 200 and not _capture["body"]:
-                _capture["status"] = 404
-                _capture["body"] = b"Not found"
+                cap = _get_capture()
+                if cap and cap["status"] == 200 and not cap["body"]:
+                    cap["status"] = 404
+                    cap["body"] = b"Not found"
+            cap = _get_capture()
+            if cap and cap["status"] == 200 and not cap["body"]:
+                cap["status"] = 404
+                cap["body"] = b"Not found"
 
-    # Logout/redirect set a Set-Cookie via extra_headers — captured. Static
-    # file responses carry the body in handler.wfile (our capture) already.
+    capture = _get_capture() or {"status": 500, "headers": [], "body": b'{"error":"internal"}'}
     status_text = {
         200: "OK", 302: "Found", 400: "Bad Request", 401: "Unauthorized",
         403: "Forbidden", 404: "Not Found", 413: "Payload Too Large",
         500: "Internal Server Error",
-    }.get(_capture["status"], "Server Error")
+    }.get(capture["status"], "Server Error")
 
-    headers = _capture["headers"]
-    # Ensure a content-type and content-length (WSGI requires no framing, but
-    # browsers do; send_bytes already set Content-Type/Length for API, and
-    # for file bodies we add them here).
+    headers = capture["headers"]
     header_keys = [k.lower() for k, _ in headers]
     if "content-length" not in header_keys:
-        headers.append(("Content-Length", str(len(_capture["body"]))))
+        headers.append(("Content-Length", str(len(capture["body"]))))
     if "content-type" not in header_keys:
         headers.append(("Content-Type", "text/html; charset=utf-8"))
-    # Security headers (same as send_bytes).
     for k, v in [
         ("X-Content-Type-Options", "nosniff"),
         ("X-Frame-Options", "SAMEORIGIN"),
@@ -198,5 +230,5 @@ def application(environ, start_response):
         if k.lower() not in header_keys:
             headers.append((k, v))
 
-    start_response("%d %s" % (_capture["status"], status_text), headers)
-    return [_capture["body"]]
+    start_response("%d %s" % (capture["status"], status_text), headers)
+    return [capture["body"]]

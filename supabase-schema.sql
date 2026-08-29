@@ -2,6 +2,10 @@
 -- auth.users (Supabase builtin) → profiles ek
 -- Her kullanıcının kendi layout/ayarları, servisleri, bookmark'ları, logları
 
+-- 0) Required extensions (pgcrypto provides crypt/gen_salt/gen_random_uuid)
+create extension if not exists pgcrypto with schema extensions;
+create extension if not exists pgcrypto;
+
 -- 1) Profiller — auth.users ile 1:1
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
@@ -150,7 +154,7 @@ do $$ begin
   end if;
 end $$;
 
--- Bypass for email rate limit: create user directly with email_confirmed_at = now() (SECURITY DEFINER, anon can call)
+-- Bypass for email rate limit: create user directly with email_confirmed_at = now() (SECURITY DEFINER, service_role only)
 create or replace function public.signup_bypass(email text, password text, username text default null)
 returns json language plpgsql security definer set search_path = public, auth, extensions, pg_catalog as $$
 declare new_id uuid := gen_random_uuid(); enc text; uname text;
@@ -158,14 +162,39 @@ begin
   if email is null or email !~ '^[^@]+@[^@]+\.[^@]+$' then return json_build_object('error','invalid email'); end if;
   if password is null or length(password) < 8 then return json_build_object('error','weak password'); end if;
   if exists (select 1 from auth.users where auth.users.email = signup_bypass.email) then return json_build_object('error','email exists'); end if;
-  uname := coalesce(username, split_part(email,'@',1));
+  uname := coalesce(nullif(trim(username),''), split_part(email,'@',1));
+  -- username uniqueness check (also via profiles unique, but give friendly error)
+  if exists (select 1 from public.profiles where username = uname) then return json_build_object('error','username exists'); end if;
   enc := extensions.crypt(password, extensions.gen_salt('bf',6));
   insert into auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at, confirmation_token, recovery_token)
   values ('00000000-0000-0000-0000-000000000000'::uuid, new_id, 'authenticated','authenticated', email, enc, now(), jsonb_build_object('provider','email','providers',array['email']), jsonb_build_object('username',uname), now(), now(), '', '') ;
+  -- CRIT-04: GoTrue requires identities row for email provider
+  insert into auth.identities (id, user_id, identity_data, provider, provider_id, last_sign_in_at, created_at, updated_at)
+  values (gen_random_uuid(), new_id, jsonb_build_object('sub', new_id::text, 'email', email), 'email', email, now(), now(), now());
   insert into public.profiles (id, username) values (new_id, uname) on conflict (id) do nothing;
   insert into public.user_settings (user_id, settings, layout) values (new_id, '{}'::jsonb, '{}'::jsonb) on conflict (user_id) do nothing;
   return json_build_object('id', new_id, 'email', email, 'username', uname);
 exception when others then return json_build_object('error', SQLERRM);
 end; $$;
 revoke all on function public.signup_bypass(text, text, text) from public;
-grant execute on function public.signup_bypass(text, text, text) to anon, authenticated, service_role;
+revoke all on function public.signup_bypass(text, text, text) from anon, authenticated;
+grant execute on function public.signup_bypass(text, text, text) to service_role;
+
+-- HIGH-02: RPCs for username login (SECURITY DEFINER, bypass RLS)
+create or replace function public.get_email_by_username(uname text)
+returns text language sql security definer set search_path = public, auth, pg_catalog as $$
+  select email from auth.users where raw_user_meta_data->>'username' = get_email_by_username.uname limit 1;
+$$;
+revoke all on function public.get_email_by_username(text) from public;
+grant execute on function public.get_email_by_username(text) to anon, authenticated, service_role;
+
+create or replace function public.username_exists(uname text)
+returns boolean language sql security definer set search_path = public, auth, pg_catalog as $$
+  select exists(
+    select 1 from auth.users where raw_user_meta_data->>'username' = username_exists.uname
+    union all
+    select 1 from public.profiles where username = username_exists.uname
+  );
+$$;
+revoke all on function public.username_exists(text) from public;
+grant execute on function public.username_exists(text) to anon, authenticated, service_role;

@@ -744,8 +744,14 @@
 
   async function checkBeszel(showToast) {
     const testUrl = beszelUrl.value.trim();
-    // Placeholder/example URLs are not real Beszel — treat as not configured without network request
-    const isPlaceholder = !testUrl || testUrl === 'https://beszel.example.com' || testUrl.includes('example.com');
+    // Placeholder/example URLs are not real Beszel — treat as not configured without network request (HIGH-04: exact host check)
+    let isPlaceholder = !testUrl;
+    try {
+      const h = new URL(testUrl).host.toLowerCase().split(':')[0];
+      isPlaceholder = isPlaceholder || h === 'example.com' || h.endsWith('.example.com') || h === 'beszel.example.com' || h.endsWith('.beszel.example.com');
+    } catch {
+      isPlaceholder = isPlaceholder || testUrl === 'https://beszel.example.com' || testUrl.includes('example.com');
+    }
     const msgEl = beszelStatusEl;
     beszelTestBtn.disabled = true;
     msgEl.textContent = 'Checking Beszel…';

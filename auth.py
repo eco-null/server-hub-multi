@@ -37,7 +37,7 @@ class SupabaseClient:
         self.rest_url = url.rstrip("/") + "/rest/v1"
         self.anon_key = anon_key
         self.service_role_key = service_role_key or anon_key
-        self._connect_timeout = 20
+        self._connect_timeout = 10
 
     # ---- HTTP helpers ----
 
@@ -91,12 +91,15 @@ class SupabaseClient:
         return self._request(self.auth_url + "/signup", method="POST", body=body)
 
     def signup_bypass(self, email, password, username=None):
-        """Bypass email rate limit: create user directly via SECURITY DEFINER RPC (auto-confirmed)."""
+        """Bypass email rate limit: create user directly via SECURITY DEFINER RPC (auto-confirmed).
+        Requires service_role key (anon revoked per CRIT-03). Falls back to anon only when service_role == anon (local dev)."""
         try:
             res = self._request(
                 self.rest_url + "/rpc/signup_bypass",
                 method="POST",
                 body={"email": email, "password": password, "username": username or ""},
+                token=self.service_role_key,
+                headers={"apikey": self.service_role_key},
             )
             # RPC returns json like {"id": "...", "email": "..."} or {"error": "..."}
             if isinstance(res, dict) and res.get("error"):

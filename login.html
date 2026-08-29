@@ -485,7 +485,13 @@
         if (signupForm) {
           signupForm.addEventListener("submit", function (e) {
             var ts = parseInt(tsEl && tsEl.value, 10);
-            var elapsed = Date.now() - ts;
+            var now = Date.now();
+            var elapsed = now - ts;
+            // LOW-03: if honeypot ts is stale (>1h), refresh and allow submit with fresh ts
+            if (ts && elapsed > 3600000) {
+              setTs();
+              return;
+            }
             if (!ts || elapsed < 1500) {
               e.preventDefault();
               show("error-signup-honeypot");

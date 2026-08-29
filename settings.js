@@ -138,6 +138,22 @@ function set(partial) {
 
 /* Pull settings from the server (Supabase) when available and merge them over
  * current ones (server wins — it is the cross-device source of truth). */
+function _stableStringify(obj) {
+  // Order-independent JSON for hasLocalChanges check (MED-05)
+  const seen = new WeakSet();
+  function sortKeys(o) {
+    if (o && typeof o === 'object' && !Array.isArray(o)) {
+      if (seen.has(o)) return o;
+      seen.add(o);
+      const out = {};
+      Object.keys(o).sort().forEach(k => { out[k] = sortKeys(o[k]); });
+      return out;
+    }
+    if (Array.isArray(o)) return o.map(sortKeys);
+    return o;
+  }
+  return JSON.stringify(sortKeys(obj));
+}
 async function loadFromServer() {
   if (typeof fetch !== 'function') return null;
   // Retry: serverless cold-start ilk istekte 500 dönebilir — 2 ek deneme.
@@ -157,7 +173,7 @@ async function loadFromServer() {
       if (isEmptyRemote) {
         // Check if local has non-default values that would leak to new user
         const cur = read();
-        const hasLocalChanges = JSON.stringify(cur) !== JSON.stringify(DEFAULTS);
+        const hasLocalChanges = _stableStringify(cur) !== _stableStringify(DEFAULTS);
         if (hasLocalChanges) {
           next = deepMerge(structuredCloneSafe(DEFAULTS), remote);
           try { safeStorage.setItem(SETTINGS_KEY, JSON.stringify(next)); } catch {}
@@ -165,8 +181,14 @@ async function loadFromServer() {
           next = cur;
         }
       } else {
-        const cur = read();
-        next = deepMerge(cur, remote);
+        // MED-05: server is authoritative — deletions must propagate.
+        // deepMerge(cur, remote) kept stale local keys; instead build from defaults+remote
+        // and replace top-level keys wholesale so removed keys are deleted.
+        next = deepMerge(structuredCloneSafe(DEFAULTS), remote);
+        // Also handle case where remote explicitly deleted a top-level key that exists in cur
+        // (already covered because we start from DEFAULTS not cur). For safety, also
+        // ensure any non-default top-level key in cur not present in remote is removed
+        // (next already doesn't have it).
         try { safeStorage.setItem(SETTINGS_KEY, JSON.stringify(next)); } catch {}
       }
       emit(next);
@@ -209,8 +231,10 @@ function apply(s) {
   document.documentElement.style.setProperty('--accent', s.accent);
   document.documentElement.style.setProperty('--accent-glow', hexToRgba(s.accent, 0.20));
 
-  // Page title + subtitle
-  document.title = s.pageTitle + ' — Self-Hosted Services';
+  // Page title + subtitle — don't overwrite Settings page title (MED-04)
+  if (!location.pathname.includes('settings')) {
+    document.title = s.pageTitle + ' — Self-Hosted Services';
+  }
   const h1 = document.querySelector('h1');
   if (h1 && h1.dataset.dynamic === 'true') h1.textContent = s.pageTitle;
   const sub = document.querySelector('[data-dynamic-subtitle]');

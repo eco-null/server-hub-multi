@@ -76,6 +76,8 @@ def validate_service(data, partial=False):
             return None, "url is required"
         if len(url) > 2000:
             return None, "url too long"
+        if " " in url:
+            return None, "url must not contain spaces"
         if not re.match(r"^https?://", url):
             return None, "url must start with http:// or https://"
         try:
@@ -120,12 +122,19 @@ def validate_bookmark(data, partial=False):
             return None, "url is required"
         if len(url) > 2000:
             return None, "url too long"
+        if " " in url:
+            return None, "url must not contain spaces"
         if not re.match(r"^https?://", url):
             return None, "url must start with http:// or https://"
+        try:
+            if not urllib.parse.urlparse(url).netloc:
+                return None, "url must be a valid http(s) URL"
+        except ValueError:
+            return None, "url must be a valid http(s) URL"
         fields["url"] = url
     if "icon" in data or not partial:
         icon = str(data.get("icon") or "link").strip()
-        fields["icon"] = icon or "link"
+        fields["icon"] = icon if icon in KNOWN_ICONS else "link"
     if "color" in data or not partial:
         color = str(data.get("color") or "").strip()
         if color:
@@ -158,6 +167,11 @@ class ServiceStore:
         tmp = self._path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump({"services": self._services, "bookmarks": self._bookmarks}, f, indent=2)
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except OSError:
+                pass
         os.replace(tmp, self._path)
 
     def list(self):
@@ -257,7 +271,10 @@ class Sessions:
     def __init__(self, secret=None):
         self._tokens = {}
         self._lock = threading.Lock()
-        self._secret = secret or os.environ.get("SESSION_SECRET") or secrets.token_hex(32)
+        env_secret = secret or os.environ.get("SESSION_SECRET")
+        if not env_secret and os.environ.get("VERCEL"):
+            raise RuntimeError("SESSION_SECRET must be set on Vercel (fleet needs stable HMAC key) — see MED-06")
+        self._secret = env_secret or secrets.token_hex(32)
 
     # ---- legacy in-memory API ----
     def create(self, user):
@@ -404,7 +421,7 @@ register_guard = RegisterGuard(max_per_window=3, window_seconds=15 * 60)
 
 # ---- system stats (Linux /proc; returns None when unavailable) ----
 # Cached CPU reading to avoid blocking the request handler with sleep(0.1)
-_cpu_cache = {"a": None, "b": None, "val": None, "ts": 0}
+_cpu_cache = {"prev": None, "val": None, "ts": 0}
 _cpu_lock = threading.Lock()
 
 def _read_cpu():
@@ -428,33 +445,21 @@ def cpu_percent():
         # If cache is fresh (<1.5s), return it without blocking
         if _cpu_cache["val"] is not None and now - _cpu_cache["ts"] < 1.5:
             return _cpu_cache["val"]
-        a = _read_cpu()
-        if not a:
+        cur = _read_cpu()
+        if not cur:
             return None
-        # If we have a previous 'a', compute delta without sleep by using stored previous
-        prev_a = _cpu_cache["a"]
-        prev_b = _cpu_cache["b"]
-        # Store current as next 'a' for next call
-        _cpu_cache["a"] = a
-        if prev_a is None:
-            # First call: need second sample, but do it without blocking the handler by
-            # returning None once and letting next poll (1.5s later) compute it.
-            # For immediate value, do a very short non-blocking second read after 0.02s in background thread
-            # Instead, fallback to single-sample estimate: use /proc/loadavg as proxy or return None
-            # We choose to return None for first hit and let next call compute, but for UX we try a quick second read
-            # with minimal sleep in a thread-safe way that doesn't block the main handler via double-read cache
-            _cpu_cache["b"] = a
+        prev = _cpu_cache["prev"]
+        _cpu_cache["prev"] = cur
+        if prev is None:
             _cpu_cache["ts"] = now
             return None
-        # Compute with previous and current
-        total_delta = a[0] - prev_a[0]
-        idle_delta = a[1] - prev_a[1]
+        total_delta = cur[0] - prev[0]
+        idle_delta = cur[1] - prev[1]
         if total_delta <= 0:
             _cpu_cache["val"] = None
         else:
             _cpu_cache["val"] = round(100 * (1 - idle_delta / total_delta))
         _cpu_cache["ts"] = now
-        _cpu_cache["b"] = a
         return _cpu_cache["val"]
 
 
@@ -648,10 +653,9 @@ def _beszel_systems(cfg=None):
     if not cfg or not cfg.get("url"):
         return None
     # Treat placeholder/example URL as not configured (prevents 500 on settings test)
-    placeholder_hosts = ("beszel.example.com", "example.com")
     try:
-        host = urllib.parse.urlparse(cfg["url"]).netloc.lower()
-        if any(ph in host for ph in placeholder_hosts):
+        host = urllib.parse.urlparse(cfg["url"]).netloc.lower().split(":")[0]
+        if host == "example.com" or host.endswith(".example.com") or host == "beszel.example.com" or host.endswith(".beszel.example.com"):
             return None
     except:
         pass
@@ -701,6 +705,15 @@ class HubHandler(BaseHTTPRequestHandler):
         print("[%s] %s" % (self.client_address[0], fmt % args))
 
     def client_ip(self):
+        # HIGH-05: real IP behind Vercel / reverse proxy
+        xff = self.headers.get("X-Forwarded-For", "")
+        if xff:
+            first = xff.split(",")[0].strip()
+            if first:
+                return first
+        xri = self.headers.get("X-Real-IP", "")
+        if xri:
+            return xri.strip()
         return self.client_address[0]
 
     def send_bytes(self, body, status=200, ctype="text/html; charset=utf-8", extra_headers=None):
@@ -718,7 +731,7 @@ class HubHandler(BaseHTTPRequestHandler):
                          "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com; "
                          "font-src 'self' https://fonts.gstatic.com; "
                          "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; "
-                         "connect-src 'self' https:; frame-ancestors 'self'")
+                         "connect-src 'self'; frame-ancestors 'self'")
         for key, value in (extra_headers or {}).items():
             self.send_header(key, value)
         # Token refresh sırasında yeni imzalı cookie bu yanıta eklenir.
@@ -745,8 +758,11 @@ class HubHandler(BaseHTTPRequestHandler):
         raw = self.headers.get("Cookie") or ""
         for part in raw.split(";"):
             part = part.strip()
-            if part.startswith(name + "="):
-                return part[len(name) + 1:]
+            if not part or "=" not in part:
+                continue
+            k, v = part.split("=", 1)
+            if k.strip() == name:
+                return v.strip()
         return None
 
     def read_json_body(self):
@@ -968,16 +984,26 @@ class HubHandler(BaseHTTPRequestHandler):
         if isinstance(incoming_settings, dict):
             settings = dict(cur_settings)
             for k, v in incoming_settings.items():
+                # MED-03: null must not wipe dict with None
+                if v is None:
+                    continue
+                # Reject non-dict for known dict sections to avoid type corruption
+                if k in ("beszel", "twofa") and not isinstance(v, dict):
+                    continue
                 if k == "beszel" and isinstance(v, dict):
                     merged = dict(cur_settings.get("beszel") or {})
                     for bk, bv in v.items():
                         if bk == "password" and not bv:
                             continue  # boş password → mevcut korunur
+                        if bv is None:
+                            continue
                         merged[bk] = bv
                     settings["beszel"] = merged
                 elif isinstance(v, dict) and isinstance(cur_settings.get(k), dict):
                     merged = dict(cur_settings[k])
                     for sk, sv in v.items():
+                        if sv is None:
+                            continue
                         if sv == "" and isinstance(sv, str) and sk in ("url", "user", "password"):
                             continue
                         merged[sk] = sv
@@ -1192,8 +1218,8 @@ class HubHandler(BaseHTTPRequestHandler):
                 "application/json; charset=utf-8")
         # Placeholder/example URL is not a real Beszel — treat as not configured
         try:
-            _host = urllib.parse.urlparse(cfg["url"]).netloc.lower()
-            if "beszel.example.com" in _host or _host == "example.com" or "example.com" in _host:
+            _host = urllib.parse.urlparse(cfg["url"]).netloc.lower().split(":")[0]
+            if _host == "example.com" or _host.endswith(".example.com") or _host == "beszel.example.com" or _host.endswith(".beszel.example.com"):
                 return self.send_bytes(json.dumps({"enabled": False}), 200, "application/json; charset=utf-8")
         except:
             pass
@@ -1299,17 +1325,18 @@ class HubHandler(BaseHTTPRequestHandler):
         Origin header'ı yoksa (curl, eski istemci) allow — SameSite=Lax cookie
         zaten tarayıcı tabanlı CSRF'yi büyük ölçüde engeller; Origin farklıysa
         (cross-site form/JS) reddet. Sec-Fetch-Site: cross-site de reddet.
+        Also checks X-Forwarded-Host behind proxy (LOW-02).
         """
         origin = self.headers.get("Origin")
         if origin:
-            # Login/register formları dahil her şey same-origin gönderir.
             ref = self.headers.get("Host", "")
+            xfh = self.headers.get("X-Forwarded-Host", "")
             try:
                 from urllib.parse import urlparse
                 o_host = urlparse(origin).netloc
             except ValueError:
                 return True
-            if o_host and o_host != ref:
+            if o_host and o_host != ref and o_host != xfh:
                 return True
         fetch_site = self.headers.get("Sec-Fetch-Site")
         if fetch_site == "cross-site":
@@ -1381,7 +1408,7 @@ class HubHandler(BaseHTTPRequestHandler):
                 try:
                     ts = int(form_ts) if form_ts else 0
                     now_ms = int(time.time() * 1000)
-                    if not ts or now_ms - ts < 1500 or now_ms - ts > 3600000 or ts > now_ms + 5000:
+                    if not ts or now_ms - ts < 1500 or now_ms - ts > 3600000 or ts > now_ms + 30000:
                         return self.redirect("/login?show=signup&error=honeypot")
                 except:
                     return self.redirect("/login?show=signup&error=honeypot")
