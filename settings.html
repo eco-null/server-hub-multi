@@ -42,11 +42,18 @@
     }
     html, body { background-color: var(--bg-deep); color: var(--fg); }
     body {
-      background:
-        radial-gradient(1000px 600px at 80% -10%, var(--accent-glow), transparent 60%),
-        linear-gradient(180deg, var(--bg-elev), var(--bg-deep));
+      background: var(--bg-deep);
+      background-image:
+        linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+      background-size: 32px 32px;
       min-height: 100vh;
       transition: background-color 400ms var(--ease), color 400ms var(--ease);
+    }
+    html.light body {
+      background-image:
+        linear-gradient(rgba(0, 0, 0, 0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 0, 0, 0.04) 1px, transparent 1px);
     }
     /* Wallpaper readability — html.wallpaper-light / html.wallpaper-dark
        toggled by HubSettings.applyWallpaper (settings.js). Keeps glass + text
@@ -620,7 +627,6 @@
     { key: 'stats',      label: 'System stats widget',   desc: 'CPU / Memory / Disk bars (requires /api/stats).' },
     { key: 'search',     label: 'Search & filter',       desc: 'Filter box to find a service by name.' },
     { key: 'statusPings',label: 'Status indicators',    desc: 'Ping each service to show up/down dots.' },
-    { key: 'blobs',      label: 'Ambient blobs',         desc: 'Decorative gradient blobs in the background.' },
     { key: 'beszelUptime', label: 'Beszel uptime',       desc: 'Show each server’s uptime next to its status.' },
   ];
   const featureList = document.getElementById('feature-list');

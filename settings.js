@@ -61,7 +61,6 @@ const DEFAULTS = Object.freeze({
     greeting: true,
     stats: true,
     statusPings: true,
-    blobs: false,
     search: true,
     beszelUptime: true,
   },
@@ -223,7 +222,6 @@ function apply(s) {
   toggle('[data-feature="greeting"]',  f.greeting);
   toggle('[data-feature="stats"]',     f.stats);
   toggle('[data-feature="search"]',    f.search);
-  toggle('[data-feature="blobs"]',     f.blobs); // container with all blobs (set in index)
   toggle('[data-feature="status"]',     f.statusPings); // dotted control handled in render
 
   // userName into greeting (marker element)

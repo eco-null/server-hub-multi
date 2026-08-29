@@ -103,38 +103,20 @@
     html, body { background-color: var(--bg-deep); color: var(--fg); }
     body { overscroll-behavior-y: contain; }
     body {
-      background:
-        radial-gradient(1100px 680px at 7% -12%, color-mix(in srgb, var(--blob-a) 18%, transparent), transparent 65%),
-        radial-gradient(900px 720px at 104% 88%, color-mix(in srgb, var(--blob-b) 13%, transparent), transparent 62%),
-        linear-gradient(color-mix(in srgb, var(--fg) 2.5%, transparent) 1px, transparent 1px),
-        linear-gradient(90deg, color-mix(in srgb, var(--fg) 2.5%, transparent) 1px, transparent 1px),
-        linear-gradient(145deg, var(--bg-elev) 0%, var(--bg-deep) 72%);
-      background-size: auto, auto, 48px 48px, 48px 48px, auto;
+      background: var(--bg-deep);
+      background-image:
+        linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+      background-size: 32px 32px;
       min-height: 100vh;
       transition: background-color 400ms var(--ease), color 400ms var(--ease);
     }
-    /* Ambient blobs — pre-blurred radial gradients instead of filter: blur().
-       A blurred solid circle looks exactly like a soft radial fade, but the
-       filter would force the browser to re-rasterize a huge blurred region on
-       every animation frame (the main-page scroll jank). Gradient = same look,
-       ~zero cost. */
-    .blob {
-      position: fixed; border-radius: 9999px;
-      opacity: var(--blob-opacity); pointer-events: none; z-index: 0;
-      animation: drift 22s var(--ease) infinite alternate;
-      /* Promote to its own compositor layer so the drift animation never
-         touches the main thread — keeps scrolling buttery smooth. */
-      will-change: transform;
-      transform: translateZ(0);
+    html.light body {
+      background-image:
+        linear-gradient(rgba(0, 0, 0, 0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 0, 0, 0.04) 1px, transparent 1px);
     }
-    .blob.a { width: 420px; height: 420px; background: radial-gradient(circle, var(--blob-a) 0%, transparent 72%); top: -120px; left: -80px; }
-    .blob.b { width: 360px; height: 360px; background: radial-gradient(circle, var(--blob-b) 0%, transparent 72%); top: 10vh;  right: -120px; animation-delay: -6s; }
-    .blob.c { width: 320px; height: 320px; background: radial-gradient(circle, var(--blob-c) 0%, transparent 72%); bottom: -120px; left: 35%; opacity: calc(var(--blob-opacity) * 0.55); animation-delay: -12s; }
-    @keyframes drift {
-      0%   { transform: translate3d(0,0,0) scale(1); }
-      50%  { transform: translate3d(40px,30px,0) scale(1.08); }
-      100% { transform: translate3d(-30px,-20px,0) scale(0.96); }
-    }
+    /* Blobs removed permanently — no glowing circles on any page */
     .glass {
       background: var(--surface);
       backdrop-filter: blur(20px) saturate(140%);
@@ -373,7 +355,6 @@
       to   { opacity: 1; transform: translateY(0); }
     }
     @media (prefers-reduced-motion: reduce) {
-      .blob { animation: none; }
       .card, .reveal, .skel, body { transition: none; }
       .reveal { opacity: 1; transform: none; }
       .skel { animation: none; }
@@ -402,7 +383,6 @@
         -webkit-backdrop-filter: none !important;
         background: rgba(0,0,0,0.60) !important;
       }
-      .blob { animation: none !important; will-change: auto !important; transform: none !important; }
       .card { transition: background-color 200ms var(--ease), border-color 200ms var(--ease) !important; }
       .card:hover { transform: none !important; box-shadow: none !important; }
       .glass:hover { background: var(--surface) !important; border-color: var(--border) !important; }
@@ -488,11 +468,6 @@
 </head>
 <body class="font-sans antialiased">
   <div id="wallpaper" aria-hidden="true"></div>
-  <div data-feature="blobs">
-    <div class="blob a" aria-hidden="true"></div>
-    <div class="blob b" aria-hidden="true"></div>
-    <div class="blob c" aria-hidden="true"></div>
-  </div>
 
   <main class="relative z-10 mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8 py-6 sm:py-8 flex flex-col min-h-[calc(100vh-3rem)]">
 

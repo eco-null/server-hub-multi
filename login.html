@@ -105,23 +105,14 @@
         display: grid;
         place-items: center;
         border-radius: 8px;
-        background: var(--text);
-        color: var(--bg);
+        background: var(--field);
+        border: 1px solid var(--border);
       }
 
       .brand-mark img {
         width: 18px;
         height: 18px;
-        filter: invert(1);
-      }
-
-      html.light .brand-mark {
-        background: var(--text);
-        color: var(--panel);
-      }
-
-      html.light .brand-mark img {
-        filter: none;
+        display: block;
       }
 
       h1 {
