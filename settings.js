@@ -240,6 +240,9 @@ function hexToRgba(hex, a) {
   return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
 }
 
+const GRID_OVERLAY_DARK = 'linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px)';
+const GRID_OVERLAY_LIGHT = 'linear-gradient(rgba(15,23,42,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(15,23,42,0.06) 1px, transparent 1px)';
+
 const GRADIENTS_BASE = {
   aurora: 'linear-gradient(160deg, #1e293b 0%, #334155 100%)',
   dusk: 'linear-gradient(160deg, #312e81 0%, #4338ca 100%)',
@@ -250,19 +253,6 @@ const GRADIENTS_BASE = {
   slate: 'linear-gradient(160deg, #0f172a 0%, #334155 100%)',
   sage: 'linear-gradient(160deg, #1a2e1a 0%, #3f6212 100%)',
 };
-const GRID_OVERLAY_DARK = 'linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px)';
-const GRID_OVERLAY_LIGHT = 'linear-gradient(rgba(15,23,42,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(15,23,42,0.06) 1px, transparent 1px)';
-function buildGradient(key, isLight, showGrid) {
-  const base = (isLight ? LIGHT_GRADIENTS_BASE[key] : GRADIENTS_BASE[key]) || GRADIENTS_BASE.mono;
-  if (showGrid === false) return base;
-  const grid = isLight ? GRID_OVERLAY_LIGHT : GRID_OVERLAY_DARK;
-  return grid + ', ' + base;
-}
-// Back-compat: GRADIENTS and LIGHT_GRADIENTS return with grid by default (for swatches)
-const GRADIENTS = GRADIENTS_BASE;
-const _lightProxy = LIGHT_GRADIENTS_BASE;
-
-/* Light-theme gradient palettes — solid pastel + grid */
 const LIGHT_GRADIENTS_BASE = {
   aurora: 'linear-gradient(160deg, #e2e8f0 0%, #cbd5e1 100%)',
   dusk: 'linear-gradient(160deg, #ddd6fe 0%, #c4b5fd 100%)',
@@ -273,6 +263,14 @@ const LIGHT_GRADIENTS_BASE = {
   slate: 'linear-gradient(160deg, #e2e8f0 0%, #f1f5f9 100%)',
   sage: 'linear-gradient(160deg, #dcfce7 0%, #f0fdf4 100%)',
 };
+function buildGradient(key, isLight, showGrid) {
+  const base = (isLight ? LIGHT_GRADIENTS_BASE[key] : GRADIENTS_BASE[key]) || GRADIENTS_BASE.mono;
+  if (showGrid === false) return base;
+  const grid = isLight ? GRID_OVERLAY_LIGHT : GRID_OVERLAY_DARK;
+  return grid + ', ' + base;
+}
+// Back-compat: GRADIENTS and LIGHT_GRADIENTS return with grid by default (for swatches)
+const GRADIENTS = GRADIENTS_BASE;
 const LIGHT_GRADIENTS = LIGHT_GRADIENTS_BASE;
 
 const GradientLuminance = { aurora: false, dusk: false, ocean: false, forest: false, mono: false };
