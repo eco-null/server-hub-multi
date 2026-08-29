@@ -244,24 +244,25 @@ const GRID_OVERLAY_DARK = 'linear-gradient(rgba(255,255,255,0.025) 1px, transpar
 const GRID_OVERLAY_LIGHT = 'linear-gradient(rgba(15,23,42,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(15,23,42,0.06) 1px, transparent 1px)';
 
 const GRADIENTS_BASE = {
-  aurora: 'linear-gradient(160deg, #1e293b 0%, #334155 100%)',
-  dusk: 'linear-gradient(160deg, #312e81 0%, #4338ca 100%)',
-  ocean: 'linear-gradient(160deg, #0f172a 0%, #1e40af 100%)',
-  forest: 'linear-gradient(160deg, #14532d 0%, #166534 100%)',
-  mono: 'linear-gradient(160deg, #18181b 0%, #27272a 100%)',
-  grid: 'linear-gradient(160deg, #0e0e10 0%, #18181b 100%)',
-  slate: 'linear-gradient(160deg, #0f172a 0%, #334155 100%)',
-  sage: 'linear-gradient(160deg, #1a2e1a 0%, #3f6212 100%)',
+  // Elegant dark luxurious — racing green, dark velvet, midnight, carbon
+  aurora: 'linear-gradient(160deg, #0f1a1f 0%, #1a2e1a 100%)',
+  dusk: 'linear-gradient(160deg, #1a0f1f 0%, #2d0a2e 100%)',
+  ocean: 'linear-gradient(160deg, #0a1a2e 0%, #0f2a3a 100%)',
+  forest: 'linear-gradient(160deg, #01411c 0%, #1a472a 100%)',
+  mono: 'linear-gradient(160deg, #0e0e10 0%, #1e1e1e 100%)',
+  grid: 'linear-gradient(160deg, #0a0a0a 0%, #141414 100%)',
+  slate: 'linear-gradient(160deg, #121212 0%, #1f1f1f 100%)',
+  sage: 'linear-gradient(160deg, #0f1a14 0%, #1a2e1a 100%)',
 };
 const LIGHT_GRADIENTS_BASE = {
-  aurora: 'linear-gradient(160deg, #e2e8f0 0%, #cbd5e1 100%)',
-  dusk: 'linear-gradient(160deg, #ddd6fe 0%, #c4b5fd 100%)',
-  ocean: 'linear-gradient(160deg, #bfdbfe 0%, #93c5fd 100%)',
-  forest: 'linear-gradient(160deg, #bbf7d0 0%, #86efac 100%)',
-  mono: 'linear-gradient(160deg, #f4f4f5 0%, #e4e4e7 100%)',
-  grid: 'linear-gradient(160deg, #f4f4f5 0%, #e7e5e4 100%)',
-  slate: 'linear-gradient(160deg, #e2e8f0 0%, #f1f5f9 100%)',
-  sage: 'linear-gradient(160deg, #dcfce7 0%, #f0fdf4 100%)',
+  aurora: 'linear-gradient(160deg, #e7e5e4 0%, #d6d3d1 100%)',
+  dusk: 'linear-gradient(160deg, #ede9fe 0%, #ddd6fe 100%)',
+  ocean: 'linear-gradient(160deg, #dbeafe 0%, #bfdbfe 100%)',
+  forest: 'linear-gradient(160deg, #dcfce7 0%, #bbf7d0 100%)',
+  mono: 'linear-gradient(160deg, #f5f5f4 0%, #e7e5e4 100%)',
+  grid: 'linear-gradient(160deg, #fafaf9 0%, #f5f5f4 100%)',
+  slate: 'linear-gradient(160deg, #f1f5f9 0%, #e2e8f0 100%)',
+  sage: 'linear-gradient(160deg, #ecfdf5 0%, #d1fae5 100%)',
 };
 function buildGradient(key, isLight, showGrid) {
   const base = (isLight ? LIGHT_GRADIENTS_BASE[key] : GRADIENTS_BASE[key]) || GRADIENTS_BASE.mono;
@@ -302,8 +303,8 @@ function applyWallpaper(s) {
     const wallpaperEl = document.getElementById('wallpaper');
     if (wallpaperEl) {
       if (showGrid) {
-        wallpaperEl.style.backgroundSize = '32px 32px, 32px 32px, auto';
-        if (w.gradient === 'grid') wallpaperEl.style.backgroundSize = '44px 44px, 44px 44px, auto';
+        wallpaperEl.style.backgroundSize = '32px 32px, 32px 32px, cover';
+        if (w.gradient === 'grid') wallpaperEl.style.backgroundSize = '44px 44px, 44px 44px, cover';
       } else {
         wallpaperEl.style.backgroundSize = 'cover';
       }
