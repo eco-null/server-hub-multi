@@ -303,10 +303,10 @@ function applyWallpaper(s) {
     const wallpaperEl = document.getElementById('wallpaper');
     if (wallpaperEl) {
       if (showGrid) {
-        wallpaperEl.style.backgroundSize = '32px 32px, 32px 32px, cover';
-        if (w.gradient === 'grid') wallpaperEl.style.backgroundSize = '44px 44px, 44px 44px, cover';
+        wallpaperEl.style.backgroundSize = '32px 32px, 32px 32px, auto';
+        if (w.gradient === 'grid') wallpaperEl.style.backgroundSize = '44px 44px, 44px 44px, auto';
       } else {
-        wallpaperEl.style.backgroundSize = 'cover';
+        wallpaperEl.style.backgroundSize = 'auto';
       }
     }
     // Light palette gradients are bright → wallpaper-light (light text over
