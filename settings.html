@@ -254,6 +254,13 @@
             <span class="text-xs text-[color:var(--fg-muted)] hidden sm:inline">Pexels Mountain</span>
           </div>
         </div>
+        <div class="flex items-center justify-between pt-2">
+          <div>
+            <p class="font-medium text-sm">Grid overlay</p>
+            <p class="text-xs text-[color:var(--fg-muted)]">Show the subtle grid on top of every background.</p>
+          </div>
+          <button id="wp-grid-toggle" class="switch focus-ring" role="switch" aria-checked="true" aria-label="Toggle grid overlay"></button>
+        </div>
         <div class="flex items-center gap-2 pt-2">
           <input id="wp-url" class="field focus-ring flex-1" type="text" placeholder="Custom image URL (https://…)" aria-label="Custom wallpaper URL" />
           <button id="wp-apply" class="btn btn-primary focus-ring text-xs">Apply</button>
@@ -528,11 +535,23 @@
   const wpApplyBtn    = document.getElementById('wp-apply');
   const wpPexelsBtn   = document.getElementById('wp-preset-pexels');
 
+  // Swatch colors — solid pastel without grid (grid is toggleable separately)
+  const SWATCH_COLORS = {
+    aurora: '#1e293b', dusk: '#312e81', ocean: '#0f172a', forest: '#14532d',
+    mono: '#18181b', grid: '#0e0e10', slate: '#0f172a', sage: '#1a2e1a'
+  };
+  const SWATCH_LIGHT = {
+    aurora: '#e2e8f0', dusk: '#ddd6fe', ocean: '#bfdbfe', forest: '#bbf7d0',
+    mono: '#f4f4f5', grid: '#f4f4f5', slate: '#e2e8f0', sage: '#dcfce7'
+  };
   Object.keys(S.GRADIENTS || {}).forEach(k => {
     const s = document.createElement('button');
     s.className = 'swatch focus-ring wp-grad';
-    s.style.background = S.GRADIENTS[k];
-    s.setAttribute('aria-label', 'Gradient wallpaper ' + k);
+    // Use solid pastel for swatch to avoid black box from large radial in tiny swatch
+    const isLight = S.isDark ? !S.isDark(S.get()) : false;
+    s.style.background = isLight ? (SWATCH_LIGHT[k] || SWATCH_LIGHT.mono) : (SWATCH_COLORS[k] || SWATCH_COLORS.mono);
+    s.style.border = '1px solid var(--border)';
+    s.setAttribute('aria-label', 'Wallpaper ' + k);
     s.setAttribute('aria-pressed', 'false');
     s.dataset.gradient = k;
     s.title = k;
@@ -590,8 +609,28 @@
     }
     S.apply(S.get());
     window.HubSettings.applyWallpaper(S.get());
+    refreshGridToggle();
   }
   refreshWallpaper();
+
+  // Grid toggle
+  const wpGridToggle = document.getElementById('wp-grid-toggle');
+  function refreshGridToggle() {
+    const showGrid = S.get().wallpaper.showGrid !== false;
+    if (!wpGridToggle) return;
+    wpGridToggle.classList.toggle('on', showGrid);
+    wpGridToggle.setAttribute('aria-checked', String(showGrid));
+  }
+  refreshGridToggle();
+  if (wpGridToggle) {
+    wpGridToggle.addEventListener('click', () => {
+      const cur = S.get().wallpaper.showGrid !== false;
+      S.set({ wallpaper: { showGrid: !cur } });
+      refreshGridToggle();
+      refreshWallpaper();
+      toast(!cur ? 'Grid on' : 'Grid off');
+    });
+  }
 
   // Personalization fields
   const nameInput = document.getElementById('user-name');

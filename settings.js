@@ -55,6 +55,7 @@ const DEFAULTS = Object.freeze({
     mode: 'gradient',
     gradient: 'grid',
     url: '',
+    showGrid: true,
   },
   features: {
     clock: true,
@@ -239,25 +240,40 @@ function hexToRgba(hex, a) {
   return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
 }
 
-const GRADIENTS = {
-  aurora: 'radial-gradient(1200px 800px at 15% 10%, #1e3a5f 0%, transparent 55%), radial-gradient(1000px 700px at 85% 20%, #5E6AD2 0%, transparent 50%), linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px), linear-gradient(160deg, #0b1020 0%, #1a2b4a 100%)',
-  dusk: 'radial-gradient(1100px 750px at 80% 15%, #4a1e5f 0%, transparent 50%), radial-gradient(900px 650px at 20% 85%, #0f4a5f 0%, transparent 55%), linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px), linear-gradient(160deg, #0d0b1e 0%, #2a1438 100%)',
-  ocean: 'radial-gradient(1100px 750px at 20% 15%, #0e4d64 0%, transparent 55%), linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px), linear-gradient(160deg, #04121c 0%, #0b2c3d 100%)',
-  forest: 'radial-gradient(1000px 700px at 80% 10%, #1a4d2a 0%, transparent 55%), linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px), linear-gradient(160deg, #06120a 0%, #0f2a18 100%)',
-  mono: 'linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px), linear-gradient(160deg, #0a0a0c 0%, #17171a 100%)',
-  grid: 'radial-gradient(900px 520px at 7% 2%, rgba(140,167,255,0.12), transparent 66%), radial-gradient(700px 620px at 100% 100%, rgba(68,95,165,0.12), transparent 65%), linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px), linear-gradient(145deg, #080b12 0%, #101726 100%)',
+const GRADIENTS_BASE = {
+  aurora: 'linear-gradient(160deg, #1e293b 0%, #334155 100%)',
+  dusk: 'linear-gradient(160deg, #312e81 0%, #4338ca 100%)',
+  ocean: 'linear-gradient(160deg, #0f172a 0%, #1e40af 100%)',
+  forest: 'linear-gradient(160deg, #14532d 0%, #166534 100%)',
+  mono: 'linear-gradient(160deg, #18181b 0%, #27272a 100%)',
+  grid: 'linear-gradient(160deg, #0e0e10 0%, #18181b 100%)',
+  slate: 'linear-gradient(160deg, #0f172a 0%, #334155 100%)',
+  sage: 'linear-gradient(160deg, #1a2e1a 0%, #3f6212 100%)',
 };
+const GRID_OVERLAY_DARK = 'linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px)';
+const GRID_OVERLAY_LIGHT = 'linear-gradient(rgba(15,23,42,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(15,23,42,0.06) 1px, transparent 1px)';
+function buildGradient(key, isLight, showGrid) {
+  const base = (isLight ? LIGHT_GRADIENTS_BASE[key] : GRADIENTS_BASE[key]) || GRADIENTS_BASE.mono;
+  if (showGrid === false) return base;
+  const grid = isLight ? GRID_OVERLAY_LIGHT : GRID_OVERLAY_DARK;
+  return grid + ', ' + base;
+}
+// Back-compat: GRADIENTS and LIGHT_GRADIENTS return with grid by default (for swatches)
+const GRADIENTS = GRADIENTS_BASE;
+const _lightProxy = LIGHT_GRADIENTS_BASE;
 
-/* Light-theme gradient palettes — used when the user picked light theme so
-   the wallpaper stays bright instead of forcing a dark gradient. */
-const LIGHT_GRADIENTS = {
-  aurora: 'radial-gradient(1200px 800px at 15% 10%, #dbe7ff 0%, transparent 55%), radial-gradient(1000px 700px at 85% 20%, #c7d2fe 0%, transparent 50%), linear-gradient(rgba(15,23,42,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(15,23,42,0.06) 1px, transparent 1px), linear-gradient(160deg, #eef2ff 0%, #dbe4ff 100%)',
-  dusk: 'radial-gradient(1100px 750px at 80% 15%, #f3e8ff 0%, transparent 50%), radial-gradient(900px 650px at 20% 85%, #e0f2fe 0%, transparent 55%), linear-gradient(rgba(15,23,42,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(15,23,42,0.06) 1px, transparent 1px), linear-gradient(160deg, #faf5ff 0%, #f0e6ff 100%)',
-  ocean: 'radial-gradient(1100px 750px at 20% 15%, #cffafe 0%, transparent 55%), linear-gradient(rgba(15,23,42,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(15,23,42,0.06) 1px, transparent 1px), linear-gradient(160deg, #f0f9ff 0%, #d6f0ff 100%)',
-  forest: 'radial-gradient(1000px 700px at 80% 10%, #dcfce7 0%, transparent 55%), linear-gradient(rgba(15,23,42,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(15,23,42,0.06) 1px, transparent 1px), linear-gradient(160deg, #f0fdf4 0%, #d9f5e0 100%)',
-  mono: 'linear-gradient(rgba(15,23,42,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(15,23,42,0.06) 1px, transparent 1px), linear-gradient(160deg, #f8f8fa 0%, #eceef2 100%)',
-  grid: 'radial-gradient(900px 520px at 7% 2%, rgba(73,104,216,0.08), transparent 66%), radial-gradient(700px 620px at 100% 100%, rgba(68,95,165,0.08), transparent 65%), linear-gradient(rgba(15,23,42,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(15,23,42,0.06) 1px, transparent 1px), linear-gradient(145deg, #f2f5fa 0%, #e7edf7 100%)',
+/* Light-theme gradient palettes — solid pastel + grid */
+const LIGHT_GRADIENTS_BASE = {
+  aurora: 'linear-gradient(160deg, #e2e8f0 0%, #cbd5e1 100%)',
+  dusk: 'linear-gradient(160deg, #ddd6fe 0%, #c4b5fd 100%)',
+  ocean: 'linear-gradient(160deg, #bfdbfe 0%, #93c5fd 100%)',
+  forest: 'linear-gradient(160deg, #bbf7d0 0%, #86efac 100%)',
+  mono: 'linear-gradient(160deg, #f4f4f5 0%, #e4e4e7 100%)',
+  grid: 'linear-gradient(160deg, #f4f4f5 0%, #e7e5e4 100%)',
+  slate: 'linear-gradient(160deg, #e2e8f0 0%, #f1f5f9 100%)',
+  sage: 'linear-gradient(160deg, #dcfce7 0%, #f0fdf4 100%)',
 };
+const LIGHT_GRADIENTS = LIGHT_GRADIENTS_BASE;
 
 const GradientLuminance = { aurora: false, dusk: false, ocean: false, forest: false, mono: false };
 
@@ -270,18 +286,29 @@ function applyWallpaper(s) {
   // Hide the animated gradient blobs behind a custom URL wallpaper.
   const blobsEl = document.querySelector('[data-feature="blobs"]');
   const setBlobs = (show) => { if (blobsEl) blobsEl.style.display = show ? '' : 'none'; };
+  const showGrid = w.showGrid !== false;
+  // Toggle body grid (for mode:none and as base for wallpaper)
+  if (showGrid) {
+    body.style.removeProperty('background-image');
+    body.style.removeProperty('background-size');
+  } else {
+    body.style.backgroundImage = 'none';
+    body.style.backgroundSize = 'auto';
+  }
   if (w.mode === 'gradient' && GRADIENTS[w.gradient]) {
     body.classList.add('wallpaper', 'wp-active');
     // Light theme uses the bright palette; dark theme keeps the rich palette.
     const isLightTheme = s && !isDark(s);
-    const palette = isLightTheme && LIGHT_GRADIENTS[w.gradient] ? LIGHT_GRADIENTS[w.gradient] : GRADIENTS[w.gradient];
+    const palette = buildGradient(w.gradient, isLightTheme, showGrid);
     body.style.setProperty('--wp-image', palette);
-    // All gradients now include 32px/44px grid overlay — set size accordingly
     const wallpaperEl = document.getElementById('wallpaper');
     if (wallpaperEl) {
-      wallpaperEl.style.backgroundSize = 'auto, auto, 32px 32px, 32px 32px, auto';
-      // grid preset uses 44px, others use 32px — keep consistent with body grid
-      if (w.gradient === 'grid') wallpaperEl.style.backgroundSize = 'auto, auto, 44px 44px, 44px 44px, auto';
+      if (showGrid) {
+        wallpaperEl.style.backgroundSize = '32px 32px, 32px 32px, auto';
+        if (w.gradient === 'grid') wallpaperEl.style.backgroundSize = '44px 44px, 44px 44px, auto';
+      } else {
+        wallpaperEl.style.backgroundSize = 'cover';
+      }
     }
     // Light palette gradients are bright → wallpaper-light (light text over
     // blur stays readable); dark palette → wallpaper-dark as before.
@@ -308,6 +335,12 @@ function applyWallpaper(s) {
     });
   } else {
     body.style.removeProperty('--wp-image');
+    const wallpaperEl = document.getElementById('wallpaper');
+    if (wallpaperEl) wallpaperEl.style.backgroundSize = '';
+    // Respect showGrid for none/custom too (body grid)
+    if (!showGrid) {
+      body.style.backgroundImage = 'none';
+    }
     setBlobs(true);
   }
 }
