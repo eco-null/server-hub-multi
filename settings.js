@@ -317,7 +317,21 @@ function applyWallpaper(s) {
     setBlobs(true);
   } else if (w.mode === 'custom' && w.url) {
     body.classList.add('wallpaper', 'wp-active');
-    body.style.setProperty('--wp-image', 'url("' + w.url.replace(/"/g, '%22') + '")');
+    const isLightThemeCustom = s && !isDark(s);
+    const gridOverlay = showGrid ? (isLightThemeCustom ? GRID_OVERLAY_LIGHT : GRID_OVERLAY_DARK) : '';
+    const urlPart = 'url("' + w.url.replace(/"/g, '%22') + '")';
+    const combined = gridOverlay ? gridOverlay + ', ' + urlPart : urlPart;
+    body.style.setProperty('--wp-image', combined);
+    const wallpaperElCustom = document.getElementById('wallpaper');
+    if (wallpaperElCustom) {
+      if (showGrid) {
+        wallpaperElCustom.style.backgroundSize = '32px 32px, 32px 32px, cover';
+        wallpaperElCustom.style.backgroundRepeat = 'repeat, repeat, no-repeat';
+      } else {
+        wallpaperElCustom.style.backgroundSize = 'cover';
+        wallpaperElCustom.style.backgroundRepeat = 'no-repeat';
+      }
+    }
     setBlobs(false);
     sampleImageLuminance(w.url).then(dark => {
       root.classList.toggle('wallpaper-dark', dark);

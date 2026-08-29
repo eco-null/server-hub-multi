@@ -259,7 +259,7 @@
             <p class="font-medium text-sm">Grid overlay</p>
             <p class="text-xs text-[color:var(--fg-muted)]">Show the subtle grid on top of every background.</p>
           </div>
-          <button id="wp-grid-toggle" class="switch focus-ring" role="switch" aria-checked="true" aria-label="Toggle grid overlay"></button>
+          <button id="wp-grid-toggle" type="button" class="switch focus-ring" role="switch" aria-checked="true" aria-label="Toggle grid overlay" style="pointer-events:auto; position:relative; z-index:1;"></button>
         </div>
         <div class="flex items-center gap-2 pt-2">
           <input id="wp-url" class="field focus-ring flex-1" type="text" placeholder="Custom image URL (https://…)" aria-label="Custom wallpaper URL" />
@@ -588,6 +588,15 @@
     if (e.key === 'Enter') wpApplyBtn.click();
   });
 
+  // Grid toggle — defined before refreshWallpaper to avoid TDZ (refreshWallpaper calls refreshGridToggle)
+  const wpGridToggle = document.getElementById('wp-grid-toggle');
+  function refreshGridToggle() {
+    const showGrid = S.get().wallpaper.showGrid !== false;
+    if (!wpGridToggle) return;
+    wpGridToggle.classList.toggle('on', showGrid);
+    wpGridToggle.setAttribute('aria-checked', String(showGrid));
+  }
+
   function refreshWallpaper() {
     const w = S.get().wallpaper || { mode: 'none' };
     const mode = w.mode || 'none';
@@ -613,22 +622,17 @@
   }
   refreshWallpaper();
 
-  // Grid toggle
-  const wpGridToggle = document.getElementById('wp-grid-toggle');
-  function refreshGridToggle() {
-    const showGrid = S.get().wallpaper.showGrid !== false;
-    if (!wpGridToggle) return;
-    wpGridToggle.classList.toggle('on', showGrid);
-    wpGridToggle.setAttribute('aria-checked', String(showGrid));
+  function toggleGrid() {
+    const curShow = S.get().wallpaper.showGrid !== false;
+    S.set({ wallpaper: { showGrid: !curShow } });
+    refreshGridToggle();
+    refreshWallpaper();
+    toast(!curShow ? 'Grid on' : 'Grid off');
   }
-  refreshGridToggle();
   if (wpGridToggle) {
-    wpGridToggle.addEventListener('click', () => {
-      const cur = S.get().wallpaper.showGrid !== false;
-      S.set({ wallpaper: { showGrid: !cur } });
-      refreshGridToggle();
-      refreshWallpaper();
-      toast(!cur ? 'Grid on' : 'Grid off');
+    wpGridToggle.addEventListener('click', toggleGrid);
+    wpGridToggle.addEventListener('keydown', (e) => {
+      if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); toggleGrid(); }
     });
   }
 
