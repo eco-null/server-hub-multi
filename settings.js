@@ -10,7 +10,7 @@
  *   userName     string shown in greeting (empty = generic "Hello")
  *   pageTitle    string used as <h1> + document.title
  *   wallpaper    { mode, gradient, url } — background wallpaper ('none' | 'gradient' | 'custom')
- *   features     { clock, greeting, stats, statusPings, blobs, search }  (booleans)
+ *   features     { clock, greeting, stats, statusPings, search, beszelUptime }  (booleans)
  *   services     array of user-defined service entries (merged over defaults)
  *
  * Exposes:
@@ -306,7 +306,9 @@ function applyWallpaper(s) {
   body.classList.remove('wallpaper', 'wp-active');
   const root = document.documentElement;
   root.classList.remove('wallpaper-dark', 'wallpaper-light');
-  // Hide the animated gradient blobs behind a custom URL wallpaper.
+  // Blobs were removed permanently (see index.html:119) — keep no-op guard
+  // for wallpaper mode switches so custom wallpapers still hide/show correctly
+  // if the element is ever re-added.
   const blobsEl = document.querySelector('[data-feature="blobs"]');
   const setBlobs = (show) => { if (blobsEl) blobsEl.style.display = show ? '' : 'none'; };
   const showGrid = w.showGrid !== false;

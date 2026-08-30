@@ -749,7 +749,7 @@
     ok(!beszelGrid.textContent.includes('104d'), 'beszel uptime hidden when toggle off');
     w.HubSettings.set({ features: { beszelUptime: true } });
 
-    // Beszel disabled → single-host fallback renders via /api/stats
+    // Beszel disabled → System stats hidden (IP/host leak prevention, see index.html pollStats)
     apiLog = [];
     w.fetch = (url, opts = {}) => {
       apiLog.push('GET ' + url);
@@ -763,13 +763,10 @@
     };
     await w.__HUB__.pollStats();
     await new Promise(r => setTimeout(r, 10));
-    ok(apiLog.some(x => x === 'GET /api/beszel'), 'fallback pollStats GETs /api/beszel first');
-    ok(apiLog.some(x => x === 'GET /api/stats'), 'fallback GETs /api/stats');
-    const cpuValEl = w.document.getElementById('stat-cpu-val');
-    ok(cpuValEl && cpuValEl.textContent === '10%', 'fallback renders CPU bar value via /api/stats', cpuValEl && cpuValEl.textContent);
-    beszelGrid = w.document.getElementById('stats-grid');
-    ok(beszelGrid.className.includes('grid-cols-3'), 'fallback restores 3-column grid', beszelGrid.className);
-    ok(!beszelGrid.textContent.includes('casaos'), 'fallback clears beszel rows');
+    ok(apiLog.some(x => x === 'GET /api/beszel'), 'pollStats GETs /api/beszel first when disabled');
+    ok(!apiLog.some(x => x === 'GET /api/stats'), 'pollStats does NOT fallback to /api/stats when Beszel disabled (hidden for privacy)');
+    const statsSection = w.document.querySelector('[data-feature="stats"]');
+    ok(statsSection && statsSection.style.display === 'none', 'System stats hidden when Beszel disabled');
 
     // Restore default state for any subsequent test runs
     w.HubSettings.set({ theme: 'auto', features: {}, services: [], wallpaper: { mode: 'none', gradient: 'aurora', url: '' } });

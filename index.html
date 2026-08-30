@@ -181,11 +181,11 @@
          margin-left: 1.5rem !important;
          margin-bottom: 1.5rem !important;
        }
-       header::after {
-         content: '';
-         display: block;
-         clear: left;
-       }
+        header::after {
+          content: '';
+          display: block;
+          clear: both;
+        }
        #root { display: block !important; }
        #groups-cols { display: contents !important; }
        #groups .group {
@@ -413,18 +413,41 @@
         align-items: stretch !important;
       }
       /* Compact cards to fit 2 per row — fix cramped names + equal height */
-      .card {
-        padding: 0.65rem 0.6rem !important;
-        gap: 0.55rem !important;
-        border-radius: 14px !important;
-        height: 100% !important;
-        min-height: 74px !important;
-        align-items: center !important;
-      }
-      .card svg.w-6.h-6 { width: 1.25rem !important; height: 1.25rem !important; }
-      /* Hidden edit/delete actions still occupied 36px on mobile (hover disabled);
-         hide completely to free width for name/host */
-      .card-actions { display: none !important; }
+       .card {
+         padding: 0.65rem 0.6rem !important;
+         gap: 0.55rem !important;
+         border-radius: 14px !important;
+         height: 100% !important;
+         min-height: 74px !important;
+         align-items: center !important;
+         position: relative !important;
+       }
+       .card svg.w-6.h-6 { width: 1.25rem !important; height: 1.25rem !important; }
+       /* Edit/delete: hover is disabled on touch, but actions must stay reachable
+           without stealing 36px from the 2-col card. Keep layout width by
+           positioning the actions as an overlay (absolute) — no flex width taken.
+           Tap/press or focus shows them; keyboard focus also reveals. */
+        .card-actions {
+         display: flex !important;
+         position: absolute !important;
+         top: 4px; right: 4px;
+         background: var(--surface);
+         border: 1px solid var(--border);
+         border-radius: 8px;
+         padding: 2px;
+         gap: 2px !important;
+         opacity: 0 !important;
+         pointer-events: none !important;
+         transition: opacity 150ms var(--ease);
+         z-index: 1;
+       }
+       .card:focus-within .card-actions,
+       .card:active .card-actions,
+       .card-actions:focus-within,
+       .card-actions:hover {
+         opacity: 1 !important;
+         pointer-events: auto !important;
+       }
       /* Ensure truncate can actually use the freed space (nested flex needs min-w-0) */
       .card > span.min-w-0.flex-1 { min-width: 0 !important; flex: 1 1 0% !important; }
       .card > span.min-w-0.flex-1 > span.flex { min-width: 0 !important; }
@@ -1165,13 +1188,19 @@
   function pickIcon(category, name) {
     const ic = {
       Monitoring: 'chart', Security: 'shield', Network: 'globe', Media: 'film',
-      Productivity: 'note', Files: 'file', Dev: 'git', Communication: 'broadcast',
-      Home: 'home', Finance: 'shopping', AI: 'sparkles', Search: 'pulse',
-      Database: 'database', Other: 'box',
+      Productivity: 'note', Files: 'folder', Dev: 'git', Communication: 'broadcast',
+      Home: 'home', Finance: 'wallet', AI: 'sparkles', Search: 'pulse',
+      Database: 'database', Gaming: 'gamepad', Books: 'book', Money: 'wallet',
+      Travel: 'map-pin', Health: 'activity', Other: 'box',
     };
     if (/git|coder|code-server/.test(name)) return 'git';
     if (/music|navidrome/.test(name)) return 'music';
     if (/torrent|deluge|sab/.test(name)) return 'box';
+    if (/steam|minecraft|palworld|gamevault|romm/.test(name)) return 'gamepad';
+    if (/calibre|book|readarr/.test(name)) return 'book';
+    if (/ghostfolio|finance|money|budget/.test(name)) return 'wallet';
+    if (/traccar|map|travel|gps/.test(name)) return 'map-pin';
+    if (/mealie|grocy|health|fitness/.test(name)) return 'activity';
     return ic[category] || 'box';
   }
 
@@ -1683,7 +1712,7 @@
     openAddModal();
   });
 
-  // Re-render when settings change in another tab (services, blobs, wallpaper, theme)
+  // Re-render when settings change in another tab (services, wallpaper, theme)
   window.addEventListener('storage', async e => {
     if (e.key === window.HubSettings.KEY) {
       try {
