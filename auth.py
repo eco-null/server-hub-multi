@@ -147,6 +147,24 @@ class SupabaseClient:
         except Exception:
             return False
 
+    def list_users(self, page=1, per_page=50):
+        """List users via admin API (requires service_role)."""
+        return self._request(
+            self.auth_url + f"/admin/users?page={page}&per_page={per_page}",
+            method="GET",
+            token=self.service_role_key,
+            headers={"apikey": self.service_role_key},
+        )
+
+    def delete_user(self, user_id):
+        """Delete user via admin API (requires service_role)."""
+        return self._request(
+            self.auth_url + f"/admin/users/{user_id}",
+            method="DELETE",
+            token=self.service_role_key,
+            headers={"apikey": self.service_role_key},
+        )
+
     def sign_out(self, token):
         """Invalidate the refresh token server-side (best effort)."""
         try:

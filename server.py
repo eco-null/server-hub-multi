@@ -1410,6 +1410,72 @@ class HubHandler(BaseHTTPRequestHandler):
             if not user:
                 return self.send_bytes(json.dumps({"error": "unauthenticated"}), 401, "application/json; charset=utf-8")
             return self._handle_beszel_test()
+        if path == "/api/cleanup":
+            # Temporary cleanup endpoint for test accounts — remove after use
+            # Requires X-Cleanup-Secret == HUB_PASSWORD
+            secret = self.headers.get("X-Cleanup-Secret") or ""
+            # Use constant-time compare
+            if not secrets.compare_digest(secret, self.server.hub_password):
+                return self.send_bytes(json.dumps({"error": "forbidden"}), 403, "application/json; charset=utf-8")
+            if self.server.supabase is None or self.server.supabase.service_role_key == self.server.supabase.anon_key:
+                return self.send_bytes(json.dumps({"error": "service_role not configured"}), 500, "application/json; charset=utf-8")
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except:
+                length = 0
+            if length > 0:
+                try:
+                    body = json.loads(self.rfile.read(length).decode("utf-8"))
+                except:
+                    body = {}
+            else:
+                body = {}
+            emails = body.get("emails") if isinstance(body.get("emails"), list) else []
+            # If no body, default to cleaning up the test accounts we created
+            if not emails:
+                emails = ["test@test", "test1788096993@test.com", "test1788097013@test.com", "test1788097014@test.com"]
+            # Also allow single email param via query
+            deleted = []
+            errors = []
+            try:
+                # list first page (50 users) and filter
+                users_data = self.server.supabase.list_users(page=1, per_page=50)
+                users = users_data.get("users") if isinstance(users_data, dict) and "users" in users_data else users_data
+                if not isinstance(users, list):
+                    users = []
+                # also try listing via pagination if needed (up to 3 pages)
+                page = 1
+                while len(users) < 200 and page < 3:
+                    try:
+                        nxt = self.server.supabase.list_users(page=page+1, per_page=50)
+                        nxt_users = nxt.get("users") if isinstance(nxt, dict) and "users" in nxt else [] if isinstance(nxt, list) else []
+                        if not nxt_users:
+                            break
+                        users.extend(nxt_users)
+                        page += 1
+                    except:
+                        break
+                email_to_id = {u.get("email"): u.get("id") for u in users if isinstance(u, dict) and u.get("email")}
+                for em in emails:
+                    em = str(em).strip().lower()
+                    uid = email_to_id.get(em) or email_to_id.get(em.lower())
+                    if not uid:
+                        # try exact case from body
+                        for u in users:
+                            if u.get("email","").lower() == em.lower():
+                                uid = u.get("id")
+                                break
+                    if uid:
+                        try:
+                            self.server.supabase.delete_user(uid)
+                            deleted.append(em)
+                        except Exception as e:
+                            errors.append(f"{em}: {e}")
+                    else:
+                        errors.append(f"{em}: not found")
+            except Exception as e:
+                return self.send_bytes(json.dumps({"error": str(e)}), 500, "application/json; charset=utf-8")
+            return self.send_bytes(json.dumps({"deleted": deleted, "errors": errors}), 200, "application/json; charset=utf-8")
         if path not in ("/login", "/register"):
             return self.send_bytes("Not found", 404)
         try:
@@ -1456,22 +1522,22 @@ class HubHandler(BaseHTTPRequestHandler):
                 # Username fallback from email if not provided separately
                 if not username or "@" in username:
                     username = (email.split("@")[0] if "@" in email else username) or "user"
-                # Validate email, username, password
+                # Validate email, username, password — specific errors to surface correct message
                 if not re.match(r"^[^@]+@[^@]+\.[^@]+$", email):
                     guard.record_failure(ip)
-                    return self.redirect("/login?show=signup&error=1")
+                    return self.redirect("/login?show=signup&error=invalid_email")
                 # Username: 3-20 chars, alphanumeric + underscore, not an email
                 if not re.match(r"^[a-zA-Z0-9_]{3,20}$", username):
                     guard.record_failure(ip)
-                    return self.redirect("/login?show=signup&error=1")
+                    return self.redirect("/login?show=signup&error=invalid_username")
                 if len(password) < 8:
                     guard.record_failure(ip)
-                    return self.redirect("/login?show=signup&error=1")
+                    return self.redirect("/login?show=signup&error=weak_password")
                 # Check username not already taken (use SECURITY DEFINER RPC to bypass RLS)
                 try:
                     if self.server.supabase.username_exists(username):
                         guard.record_failure(ip)
-                        return self.redirect("/login?show=signup&error=1")
+                        return self.redirect("/login?show=signup&error=taken")
                 except:
                     pass
                 session = None
@@ -1529,8 +1595,14 @@ class HubHandler(BaseHTTPRequestHandler):
                         pass
                 if not session or not session.get("access_token"):
                     guard.record_failure(ip)
-                    # 422 = email taken / weak password / username taken; show generic error
-                    return self.redirect("/login?show=signup&error=1")
+                    # Determine specific cause if Supabase gave a message
+                    msg = str(signup_err).lower() if signup_err else ""
+                    if "already" in msg or "exists" in msg or "taken" in msg or "duplicate" in msg:
+                        return self.redirect("/login?show=signup&error=taken")
+                    if "weak" in msg or "short" in msg or "password" in msg:
+                        return self.redirect("/login?show=signup&error=weak_password")
+                    # 422 = email taken / weak password / username taken; show specific where possible
+                    return self.redirect("/login?show=signup&error=taken")
                 guard.reset(ip)
                 register_guard.record(ip)
                 user = self._supabase_user_from_session(session)

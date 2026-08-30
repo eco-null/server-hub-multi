@@ -377,8 +377,12 @@
           </form>
 
           <p id="error-signup" class="error hidden">Email or username already in use.</p>
+          <p id="error-taken" class="error hidden">Email or username already in use. Try signing in instead.</p>
+          <p id="error-weak" class="error hidden">Password must be at least 8 characters.</p>
+          <p id="error-invalid-email" class="error hidden">Please enter a valid email address.</p>
+          <p id="error-invalid-username" class="error hidden">Username must be 3–20 characters: letters, numbers or underscore.</p>
           <p id="error-signup-rate" class="error hidden">Too many accounts from this network. Try again in 15 minutes.</p>
-          <p id="error-signup-honeypot" class="error hidden">Bot check failed.</p>
+          <p id="error-signup-honeypot" class="error hidden">Bot check failed. Please wait a moment and try again.</p>
         </div>
       </div>
 
@@ -402,6 +406,10 @@
         else if (err === "expired") show("error-expired");
         else if (err === "rate") show("error-signup-rate");
         else if (err === "honeypot") show("error-signup-honeypot");
+        else if (err === "taken") show("error-taken");
+        else if (err === "weak_password") show("error-weak");
+        else if (err === "invalid_email") show("error-invalid-email");
+        else if (err === "invalid_username") show("error-invalid-username");
 
         var totpMode = params.get("2fa") === "1";
         if (totpMode) {
@@ -470,6 +478,10 @@
         if (location.pathname.indexOf("register") !== -1 || params.get("show") === "signup") {
           showSignup();
           if (err === "1") show("error-signup");
+          else if (err === "taken") show("error-taken");
+          else if (err === "weak_password") show("error-weak");
+          else if (err === "invalid_email") show("error-invalid-email");
+          else if (err === "invalid_username") show("error-invalid-username");
           else if (err === "rate") show("error-signup-rate");
           else if (err === "honeypot") show("error-signup-honeypot");
         }
@@ -501,7 +513,22 @@
             var uname = signupForm.querySelector('input[name="username"]');
             if (uname && !/^[a-zA-Z0-9_]{3,20}$/.test(uname.value.trim())) {
               e.preventDefault();
+              show("error-invalid-username");
               uname.focus();
+              return;
+            }
+            var email = signupForm.querySelector('input[name="email"]');
+            if (email && !/^[^@]+@[^@]+\.[^@]+$/.test(email.value.trim())) {
+              e.preventDefault();
+              show("error-invalid-email");
+              email.focus();
+              return;
+            }
+            var pw = signupForm.querySelector('input[name="password"]');
+            if (pw && pw.value.length < 8) {
+              e.preventDefault();
+              show("error-weak");
+              pw.focus();
               return;
             }
             if (signupBtn) {
