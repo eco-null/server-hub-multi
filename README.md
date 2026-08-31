@@ -26,10 +26,6 @@
 
 Everyone can use the hosted instance for free. Create an account, manage your own services, bookmarks, and settings — data is isolated per user via Supabase RLS.
 
-Want your own copy? One click to deploy:
-
-[![Deploy with Vercel](https://vercel.com/button.svg)](https://vercel.com/new/clone?repository-url=https://github.com/eco-null/server-hub-multi)
-
 ---
 
 Server Hub brings self-hosted applications, infrastructure tools, and frequently used links into one private homepage. It combines a lightweight Python backend (stdlib only) with a static frontend — no build step, no npm install.
@@ -63,7 +59,7 @@ Two deployment models are supported:
 4. Add the environment variables described in [Configuration](#configuration).
 5. Deploy and open the resulting Vercel URL — or try the live instance at **[https://server-hub-gules.vercel.app](https://server-hub-gules.vercel.app)**.
 
-   [![Deploy with Vercel](https://vercel.com/button.svg)](https://vercel.com/new/clone?repository-url=https://github.com/eco-null/server-hub-multi)
+   > **Note:** Vercel deploy requires a Supabase project and running `supabase-schema.sql` — the one-click Deploy button is omitted because it cannot provision the database automatically.
 
 Vercel uses [`api/index.py`](api/index.py) as the Python Function entry point. It adapts the existing backend to Vercel's WSGI runtime while static assets are served through the same application.
 
