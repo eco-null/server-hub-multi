@@ -961,6 +961,9 @@
   const emptyTerm   = document.getElementById('empty-term');
   const searchInput = document.getElementById('search');
 
+  function isValidHttpUrl(s) {
+    try { const u = new URL(String(s)); return u.protocol === 'https:' || u.protocol === 'http:'; } catch { return false; }
+  }
   const SEARCH_PROVIDERS = {
     google:  'https://www.google.com/search?q=',
     ddg:     'https://duckduckgo.com/?q=',
@@ -969,10 +972,14 @@
     searxng: null,
   };
   function webSearch(q) {
-    const s = window.HubSettings.get().search;
+    const s = window.HubSettings.get().search || {};
     let url;
     if (s.provider === 'searxng' && s.searxngUrl) {
-      url = s.searxngUrl.replace(/\/$/, '') + '/search?q=' + encodeURIComponent(q);
+      if (isValidHttpUrl(s.searxngUrl)) {
+        url = s.searxngUrl.replace(/\/$/, '') + '/search?q=' + encodeURIComponent(q);
+      } else {
+        url = SEARCH_PROVIDERS.google + encodeURIComponent(q);
+      }
     } else {
       url = (SEARCH_PROVIDERS[s.provider] || SEARCH_PROVIDERS.google) + encodeURIComponent(q);
     }
@@ -1450,6 +1457,11 @@
   function _runPing(card) {
     const url = card.dataset.pingUrl;
     if (!url) { _pingActive--; if (_pingQueue.length) _runPing(_pingQueue.shift()); return; }
+    if (!isValidHttpUrl(url)) {
+      const dotSkip = card.querySelector('[data-status]');
+      if (dotSkip) { dotSkip.classList.remove('status-idle','status-wait'); dotSkip.classList.add('status-idle'); dotSkip.setAttribute('aria-label', hostOf(url) + ' check skipped (invalid url)'); }
+      _pingActive--; if (_pingQueue.length) _runPing(_pingQueue.shift()); return;
+    }
     const dot = card.querySelector('[data-status]');
     if (!dot) { _pingActive--; if (_pingQueue.length) _runPing(_pingQueue.shift()); return; }
     const ctrl = new AbortController();

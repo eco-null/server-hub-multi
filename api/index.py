@@ -131,11 +131,10 @@ def _build_handler(environ, body):
 
 
 def application(environ, start_response):
-    # CRIT-05: if shared failed to init, return 500 config error
+    # CRIT-05: if shared failed to init, return generic 500 config error (no leak)
     if _shared is None:
-        msg = _shared_error or "server not configured"
-        body = ('{"error":"config: %s"}' % msg).encode("utf-8")
-        start_response("500 Internal Server Error", [("Content-Type", "application/json"), ("Content-Length", str(len(body)))])
+        body = b'{"error":"configuration error"}'
+        start_response("500 Internal Server Error", [("Content-Type", "application/json"), ("Content-Length", str(len(body))), ("X-Content-Type-Options", "nosniff"), ("X-Frame-Options", "SAMEORIGIN"), ("Referrer-Policy", "no-referrer"), ("Content-Security-Policy", "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com; font-src 'self' https://fonts.gstatic.com; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; connect-src 'self'; frame-ancestors 'self'"), ("Permissions-Policy", "camera=(), microphone=(), geolocation=()")])
         return [body]
 
     # CRIT-02: per-request capture (thread-local) + per-request retry flag
@@ -143,8 +142,33 @@ def application(environ, start_response):
     capture = _local.capture
     retried = False
 
-    content_length = int(environ.get("CONTENT_LENGTH") or 0)
-    body = environ["wsgi.input"].read(content_length) if content_length > 0 else b""
+    try:
+        content_length = int(environ.get("CONTENT_LENGTH") or 0)
+    except (TypeError, ValueError):
+        content_length = 0
+    # Body size DoS protection: cap before reading wsgi.input
+    max_body = getattr(hub_server, "MAX_API_BODY", 64*1024)
+    # login/register uses MAX_LOGIN_BODY (same size)
+    try:
+        max_login = getattr(hub_server, "MAX_LOGIN_BODY", 64*1024)
+        max_body = max(max_body, max_login)
+    except Exception:
+        pass
+    if content_length < 0:
+        content_length = 0
+    if content_length > max_body:
+        body_err = b'{"error":"payload too large"}'
+        start_response("413 Payload Too Large", [("Content-Type", "application/json"), ("Content-Length", str(len(body_err)))])
+        return [body_err]
+    # Also guard against missing CONTENT_LENGTH but huge chunked body: read at most max_body+1
+    if content_length > 0:
+        body = environ["wsgi.input"].read(min(content_length, max_body+1))
+        if len(body) > max_body:
+            body_err = b'{"error":"payload too large"}'
+            start_response("413 Payload Too Large", [("Content-Type", "application/json"), ("Content-Length", str(len(body_err)))])
+            return [body_err]
+    else:
+        body = b""
     handler = _build_handler(environ, body)
 
     # Pin capture primitives onto this handler instance only.
@@ -183,31 +207,37 @@ def application(environ, start_response):
             cap["body"] = b'{"error":"internal"}'
             capture = cap
 
-    # Static fallback: Vercel static build'leri devre dışıysa (legacy builds
-    # config'i) statik dosyaları WSGI üzerinden server.serve_file ile ver.
+    # Static fallback: only serve if authenticated (reuse HubHandler auth), else 302 to /login. Public assets allowed without session.
     capture = _get_capture()
     if capture and capture["status"] == 200 and not capture["body"] and environ.get("REQUEST_METHOD") == "GET":
-        rel = (environ.get("PATH_INFO", "/") or "/").lstrip("/")
-        if rel == "":
-            rel = "index.html"
-        if os.path.isfile(os.path.join(hub_server.WEB_ROOT, rel)):
-            try:
-                handler.path = "/" + rel
-                handler.wfile = _CaptureBody()
-                handler.send_response = _capture_send_response
-                handler.send_header = _capture_send_header
-                handler.end_headers = _capture_end_headers
-                handler.serve_file(rel)
-                capture = _get_capture()
-            except Exception:
+        _path_info = environ.get("PATH_INFO", "/") or "/"
+        _ext_pub = os.path.splitext(_path_info)[1].lower()
+        _is_public = _ext_pub in (".png", ".svg", ".ico", ".gif", ".jpg", ".jpeg", ".webp", ".js", ".css", ".woff", ".woff2")
+        _auth_user = handler.session_user() if _shared is not None else None
+        if not _auth_user and not _is_public:
+            _local.capture = {"status": 302, "headers": [("Location", "/login")], "body": b""}
+        else:
+            rel = _path_info.lstrip("/")
+            if rel == "":
+                rel = "index.html"
+            if os.path.isfile(os.path.join(hub_server.WEB_ROOT, rel)):
+                try:
+                    handler.path = "/" + rel
+                    handler.wfile = _CaptureBody()
+                    handler.send_response = _capture_send_response
+                    handler.send_header = _capture_send_header
+                    handler.end_headers = _capture_end_headers
+                    handler.serve_file(rel)
+                    capture = _get_capture()
+                except Exception:
+                    cap = _get_capture()
+                    if cap and cap["status"] == 200 and not cap["body"]:
+                        cap["status"] = 404
+                        cap["body"] = b"Not found"
                 cap = _get_capture()
                 if cap and cap["status"] == 200 and not cap["body"]:
                     cap["status"] = 404
                     cap["body"] = b"Not found"
-            cap = _get_capture()
-            if cap and cap["status"] == 200 and not cap["body"]:
-                cap["status"] = 404
-                cap["body"] = b"Not found"
 
     capture = _get_capture() or {"status": 500, "headers": [], "body": b'{"error":"internal"}'}
     status_text = {
@@ -226,9 +256,18 @@ def application(environ, start_response):
         ("X-Content-Type-Options", "nosniff"),
         ("X-Frame-Options", "SAMEORIGIN"),
         ("Referrer-Policy", "no-referrer"),
+        ("Content-Security-Policy", "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com; font-src 'self' https://fonts.gstatic.com; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; connect-src 'self'; frame-ancestors 'self'"),
+        ("Permissions-Policy", "camera=(), microphone=(), geolocation=()"),
     ]:
         if k.lower() not in header_keys:
             headers.append((k, v))
+    # Cache-Control no-store for /api/*
+    _p = environ.get("PATH_INFO", "") or ""
+    if _p.startswith("/api/") and "cache-control" not in header_keys:
+        headers.append(("Cache-Control", "no-store"))
+    # HSTS when behind https proxy
+    if environ.get("HTTP_X_FORWARDED_PROTO") == "https" and "strict-transport-security" not in header_keys:
+        headers.append(("Strict-Transport-Security", "max-age=63072000"))
 
     start_response("%d %s" % (capture["status"], status_text), headers)
     return [capture["body"]]

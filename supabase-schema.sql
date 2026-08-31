@@ -63,6 +63,57 @@ create index if not exists user_services_user_id_idx on public.user_services (us
 create index if not exists user_bookmarks_user_id_idx on public.user_bookmarks (user_id);
 
 -- ---------------------------------------------------------------------------
+-- Validation CHECKs (prevents oversized / malformed rows)
+-- ---------------------------------------------------------------------------
+-- profiles.username format
+do $$ begin
+  alter table public.profiles add constraint profiles_username_chk check (username ~ '^[a-zA-Z0-9_]{3,20}$');
+exception when duplicate_object then null; end $$;
+
+-- user_services constraints
+do $$ begin
+  alter table public.user_services add constraint user_services_name_chk check (char_length(name) between 1 and 200);
+exception when duplicate_object then null; end $$;
+do $$ begin
+  alter table public.user_services add constraint user_services_url_chk check (char_length(url) <= 2000 and url ~ '^https?://');
+exception when duplicate_object then null; end $$;
+do $$ begin
+  alter table public.user_services add constraint user_services_desc_chk check (description is null or char_length(description) <= 500);
+exception when duplicate_object then null; end $$;
+do $$ begin
+  alter table public.user_services add constraint user_services_icon_chk check (icon is null or char_length(icon) <= 50);
+exception when duplicate_object then null; end $$;
+
+-- user_bookmarks constraints
+do $$ begin
+  alter table public.user_bookmarks add constraint user_bookmarks_name_chk check (char_length(name) between 1 and 200);
+exception when duplicate_object then null; end $$;
+do $$ begin
+  alter table public.user_bookmarks add constraint user_bookmarks_url_chk check (char_length(url) <= 2000 and url ~ '^https?://');
+exception when duplicate_object then null; end $$;
+do $$ begin
+  alter table public.user_bookmarks add constraint user_bookmarks_color_chk check (color is null or color ~ '^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$');
+exception when duplicate_object then null; end $$;
+
+-- user_settings size (64 KiB limit)
+do $$ begin
+  alter table public.user_settings add constraint user_settings_settings_size_chk check (octet_length(settings::text) < 64*1024);
+exception when duplicate_object then null; end $$;
+do $$ begin
+  alter table public.user_settings add constraint user_settings_layout_size_chk check (octet_length(layout::text) < 64*1024);
+exception when duplicate_object then null; end $$;
+
+-- user_logs message length
+do $$ begin
+  alter table public.user_logs add constraint user_logs_message_chk check (char_length(message) between 1 and 2000);
+exception when duplicate_object then null; end $$;
+
+-- Secrets storage note: currently plaintext. For sensitive fields consider
+-- pgsodium (pgcrypto successor) / Supabase Vault encryption. No code change
+-- required in this fix set, but future migration should move secrets to
+-- encrypted storage (e.g., vault secrets or pgsodium column encryption).
+
+-- ---------------------------------------------------------------------------
 -- RLS: her kullanıcı SADECE kendi satırlarını görür/düzenler
 -- performans: auth.uid() -> (select auth.uid()) ile sargı (auth_rls_initplan)
 -- ---------------------------------------------------------------------------
@@ -78,7 +129,7 @@ create policy "profiles_select_own" on public.profiles
   for select using ((select auth.uid()) = id);
 drop policy if exists "profiles_update_own" on public.profiles;
 create policy "profiles_update_own" on public.profiles
-  for update using ((select auth.uid()) = id);
+  for update using ((select auth.uid()) = id) with check ((select auth.uid()) = id);
 
 -- user_settings: own read/write
 drop policy if exists "settings_select_own" on public.user_settings;
@@ -89,7 +140,11 @@ create policy "settings_insert_own" on public.user_settings
   for insert with check ((select auth.uid()) = user_id);
 drop policy if exists "settings_update_own" on public.user_settings;
 create policy "settings_update_own" on public.user_settings
-  for update using ((select auth.uid()) = user_id);
+  for update using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
+
+drop policy if exists "settings_delete_own" on public.user_settings;
+create policy "settings_delete_own" on public.user_settings
+  for delete using ((select auth.uid()) = user_id);
 
 -- user_services: own read/write
 drop policy if exists "services_select_own" on public.user_services;
@@ -100,7 +155,7 @@ create policy "services_insert_own" on public.user_services
   for insert with check ((select auth.uid()) = user_id);
 drop policy if exists "services_update_own" on public.user_services;
 create policy "services_update_own" on public.user_services
-  for update using ((select auth.uid()) = user_id);
+  for update using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
 drop policy if exists "services_delete_own" on public.user_services;
 create policy "services_delete_own" on public.user_services
   for delete using ((select auth.uid()) = user_id);
@@ -114,7 +169,7 @@ create policy "bookmarks_insert_own" on public.user_bookmarks
   for insert with check ((select auth.uid()) = user_id);
 drop policy if exists "bookmarks_update_own" on public.user_bookmarks;
 create policy "bookmarks_update_own" on public.user_bookmarks
-  for update using ((select auth.uid()) = user_id);
+  for update using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
 drop policy if exists "bookmarks_delete_own" on public.user_bookmarks;
 create policy "bookmarks_delete_own" on public.user_bookmarks
   for delete using ((select auth.uid()) = user_id);
@@ -186,7 +241,8 @@ returns text language sql security definer set search_path = public, auth, pg_ca
   select email from auth.users where raw_user_meta_data->>'username' = get_email_by_username.uname limit 1;
 $$;
 revoke all on function public.get_email_by_username(text) from public;
-grant execute on function public.get_email_by_username(text) to anon, authenticated, service_role;
+revoke all on function public.get_email_by_username(text) from anon;
+grant execute on function public.get_email_by_username(text) to authenticated, service_role;
 
 create or replace function public.username_exists(uname text)
 returns boolean language sql security definer set search_path = public, auth, pg_catalog as $$
@@ -197,4 +253,5 @@ returns boolean language sql security definer set search_path = public, auth, pg
   );
 $$;
 revoke all on function public.username_exists(text) from public;
-grant execute on function public.username_exists(text) to anon, authenticated, service_role;
+revoke all on function public.username_exists(text) from anon;
+grant execute on function public.username_exists(text) to authenticated, service_role;

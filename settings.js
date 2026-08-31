@@ -69,15 +69,43 @@ const DEFAULTS = Object.freeze({
     provider: 'google',
     searxngUrl: '',
   },
+  beszel: {
+    url: '',
+    user: '',
+    password: '',
+  },
   services: [],
 });
+
+// --- beszel password kept only in memory and server, never in localStorage ---
+let _memoryBeszelPassword = '';
+function _sanitizeForLocal(settings) {
+  try {
+    const copy = JSON.parse(JSON.stringify(settings));
+    if (copy && copy.beszel && 'password' in copy.beszel) delete copy.beszel.password;
+    return copy;
+  } catch { return settings; }
+}
+function _isValidHttpUrl(s) {
+  try { const u = new URL(String(s)); return u.protocol === 'https:' || u.protocol === 'http:'; } catch { return false; }
+}
 
 function read() {
   try {
     const raw = JSON.parse(safeStorage.getItem(SETTINGS_KEY) || '{}');
-    return deepMerge(structuredCloneSafe(DEFAULTS), raw);
+    const merged = deepMerge(structuredCloneSafe(DEFAULTS), raw);
+    if (_memoryBeszelPassword) {
+      merged.beszel = merged.beszel || { url: '', user: '', password: '' };
+      merged.beszel.password = _memoryBeszelPassword;
+    } else if (merged.beszel && 'password' in merged.beszel) {
+      delete merged.beszel.password;
+      merged.beszel.password = '';
+    }
+    return merged;
   } catch {
-    return structuredCloneSafe(DEFAULTS);
+    const fallback = structuredCloneSafe(DEFAULTS);
+    if (_memoryBeszelPassword) fallback.beszel.password = _memoryBeszelPassword;
+    return fallback;
   }
 }
 
@@ -128,10 +156,26 @@ function _saveToServer(partial) {
 }
 
 function set(partial) {
+  const originalPartial = partial ? JSON.parse(JSON.stringify(partial)) : {};
+  // capture password to memory before sanitizing; empty string means keep existing
+  if (partial && partial.beszel && typeof partial.beszel.password === 'string') {
+    if (partial.beszel.password) {
+      _memoryBeszelPassword = partial.beszel.password;
+    } else if ('password' in partial.beszel) {
+      // empty password => don't overwrite stored password; strip key so deepMerge keeps old
+      const cleaned = { ...partial, beszel: { ...partial.beszel } };
+      delete cleaned.beszel.password;
+      partial = cleaned;
+    }
+  }
   const cur = read();
   const next = deepMerge(cur, partial);
-  try { safeStorage.setItem(SETTINGS_KEY, JSON.stringify(next)); } catch {}
-  _saveToServer(partial);
+  if (_memoryBeszelPassword) {
+    next.beszel = next.beszel || { url: '', user: '', password: '' };
+    next.beszel.password = _memoryBeszelPassword;
+  }
+  try { safeStorage.setItem(SETTINGS_KEY, JSON.stringify(_sanitizeForLocal(next))); } catch {}
+  _saveToServer(originalPartial);
   emit(next);
   return next;
 }
@@ -167,16 +211,21 @@ async function loadFromServer() {
       const row = await resp.json();
       const remote = (row && (row.settings || row)) || null;
       if (!remote || typeof remote !== 'object') return null;
+      // capture beszel password into memory before sanitizing
+      if (remote && remote.beszel && typeof remote.beszel.password === 'string' && remote.beszel.password) {
+        _memoryBeszelPassword = remote.beszel.password;
+      }
       // If remote is empty (new user), don't keep old user's local settings — reset to defaults first
       const isEmptyRemote = Object.keys(remote).length === 0;
       let next;
       if (isEmptyRemote) {
         // Check if local has non-default values that would leak to new user
         const cur = read();
-        const hasLocalChanges = _stableStringify(cur) !== _stableStringify(DEFAULTS);
+        const hasLocalChanges = _stableStringify(_sanitizeForLocal(cur)) !== _stableStringify(_sanitizeForLocal(DEFAULTS));
         if (hasLocalChanges) {
           next = deepMerge(structuredCloneSafe(DEFAULTS), remote);
-          try { safeStorage.setItem(SETTINGS_KEY, JSON.stringify(next)); } catch {}
+          if (_memoryBeszelPassword) { next.beszel = next.beszel || {}; next.beszel.password = _memoryBeszelPassword; }
+          try { safeStorage.setItem(SETTINGS_KEY, JSON.stringify(_sanitizeForLocal(next))); } catch {}
         } else {
           next = cur;
         }
@@ -185,11 +234,12 @@ async function loadFromServer() {
         // deepMerge(cur, remote) kept stale local keys; instead build from defaults+remote
         // and replace top-level keys wholesale so removed keys are deleted.
         next = deepMerge(structuredCloneSafe(DEFAULTS), remote);
+        if (_memoryBeszelPassword) { next.beszel = next.beszel || {}; next.beszel.password = _memoryBeszelPassword; }
         // Also handle case where remote explicitly deleted a top-level key that exists in cur
         // (already covered because we start from DEFAULTS not cur). For safety, also
         // ensure any non-default top-level key in cur not present in remote is removed
         // (next already doesn't have it).
-        try { safeStorage.setItem(SETTINGS_KEY, JSON.stringify(next)); } catch {}
+        try { safeStorage.setItem(SETTINGS_KEY, JSON.stringify(_sanitizeForLocal(next))); } catch {}
       }
       emit(next);
       return next;
@@ -204,6 +254,9 @@ async function loadFromServer() {
 function subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); }
 
 function clear() {
+  try { clearTimeout(_syncTimer); } catch {}
+  _syncTimer = null;
+  _memoryBeszelPassword = '';
   try { safeStorage.removeItem(SETTINGS_KEY); } catch {}
   try { safeStorage.removeItem('server-hub:services'); } catch {}
   try { safeStorage.removeItem('server-hub:theme'); } catch {}
@@ -342,10 +395,18 @@ function applyWallpaper(s) {
     root.classList.add(isLightTheme ? 'wallpaper-light' : 'wallpaper-dark');
     setBlobs(true);
   } else if (w.mode === 'custom' && w.url) {
+    if (!_isValidHttpUrl(w.url)) {
+      body.style.removeProperty('--wp-image');
+      const wallpaperElBad = document.getElementById('wallpaper');
+      if (wallpaperElBad) wallpaperElBad.style.backgroundSize = '';
+      setBlobs(true);
+      return;
+    }
     body.classList.add('wallpaper', 'wp-active');
     const isLightThemeCustom = s && !isDark(s);
     const gridOverlay = showGrid ? (isLightThemeCustom ? GRID_OVERLAY_LIGHT : GRID_OVERLAY_DARK) : '';
-    const urlPart = 'url("' + w.url.replace(/"/g, '%22') + '")';
+    const escapedUrl = w.url.replace(/"/g, '%22').replace(/\(/g, '%28').replace(/\)/g, '%29');
+    const urlPart = 'url("' + escapedUrl + '")';
     const combined = gridOverlay ? gridOverlay + ', ' + urlPart : urlPart;
     body.style.setProperty('--wp-image', combined);
     const wallpaperElCustom = document.getElementById('wallpaper');

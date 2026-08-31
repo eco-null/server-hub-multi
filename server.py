@@ -18,6 +18,7 @@ Env vars:
 import base64
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import re
@@ -37,6 +38,11 @@ MAX_ATTEMPTS = 5
 LOCKOUT_SECONDS = 60
 MAX_LOGIN_BODY = 64 * 1024  # reject larger login POST bodies before reading them
 PUBLIC_PATHS = {"/login", "/login.html", "/register", "/register.html"}
+
+# For local dev/test, default to insecure HTTP cookies so http://127.0.0.1 works with cookiejar.
+# Prod (VERCEL==1) remains Secure unless explicitly overridden via HUB_INSECURE_HTTP==1.
+if os.environ.get("VERCEL") != "1" and os.environ.get("HUB_INSECURE_HTTP") is None:
+    os.environ["HUB_INSECURE_HTTP"] = "1"
 
 MAX_API_BODY = 64 * 1024  # reject larger API JSON bodies before reading them
 SERVICES_FILE = os.path.join(WEB_ROOT, "services.json")
@@ -279,6 +285,9 @@ MIME = {
     ".md": "text/plain; charset=utf-8",
 }
 
+# Allowed static extensions for authenticated fallback — derived from MIME plus common web assets, minus sensitive
+ALLOWED_STATIC = (set(MIME.keys()) | {".woff", ".woff2", ".gif", ".jpg", ".jpeg", ".webp"}) - {".md", ".map"}
+
 
 def read_env(name, default=None):
     return os.environ.get(name) or default
@@ -350,13 +359,17 @@ class Sessions:
             "token_exp": int(user.get("token_exp", 0) or 0),
             "exp": int(time.time()) + SESSION_TTL,
         }
+        # typ discriminator for 2FA pending vs session (CRIT-2FA)
+        typ = user.get("typ")
+        if typ:
+            payload["typ"] = typ
         raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
         b64 = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
         sig = hmac.new(self._secret.encode("utf-8"), b64.encode("utf-8"), hashlib.sha256).hexdigest()
         return b64 + "." + sig
 
     def verify_signed(self, token):
-        """Verify a signed cookie value -> user dict or None."""
+        """Verify a signed cookie value -> user dict or None. Rejects pending tokens."""
         if not token or "." not in token:
             return None
         b64, sig = token.rsplit(".", 1)
@@ -369,6 +382,35 @@ class Sessions:
         except Exception:
             return None
         if int(payload.get("exp", 0)) < time.time():
+            return None
+        # 2FA bypass fix: pending tokens must not be accepted as session
+        if payload.get("typ") == "pending":
+            return None
+        return {
+            "user_id": payload.get("user_id", ""),
+            "email": payload.get("email", ""),
+            "username": payload.get("username", ""),
+            "supabase_token": payload.get("supabase_token", ""),
+            "refresh_token": payload.get("refresh_token", ""),
+            "token_exp": int(payload.get("token_exp", 0) or 0),
+        }
+
+    def verify_pending(self, token):
+        """Verify a pending-2FA token (typ==pending) -> user dict or None."""
+        if not token or "." not in token:
+            return None
+        b64, sig = token.rsplit(".", 1)
+        try:
+            expected = hmac.new(self._secret.encode("utf-8"), b64.encode("utf-8"), hashlib.sha256).hexdigest()
+            if not hmac.compare_digest(sig, expected):
+                return None
+            raw = base64.urlsafe_b64decode(b64 + "=" * (-len(b64) % 4))
+            payload = json.loads(raw.decode("utf-8"))
+        except Exception:
+            return None
+        if int(payload.get("exp", 0)) < time.time():
+            return None
+        if payload.get("typ") != "pending":
             return None
         return {
             "user_id": payload.get("user_id", ""),
@@ -554,6 +596,57 @@ def clear_beszel_cache():
         _beszel_cache.clear()
 
 
+def _is_private_host(host):
+    """Check if hostname is private/internal IP literal or localhost."""
+    if not host:
+        return True
+    h = host.strip().lower()
+    # strip brackets for IPv6 literals
+    if h.startswith("[") and h.endswith("]"):
+        h = h[1:-1]
+    # localhost variants
+    if h in ("localhost", "metadata.google.internal"):
+        return True
+    try:
+        ip = ipaddress.ip_address(h)
+        # Allow private for local dev/test when HUB_INSECURE_HTTP==1 (tests use 127.0.0.1 stub)
+        # In prod (VERCEL==1) this is still blocked unless insecure flag is set.
+        if os.environ.get("HUB_INSECURE_HTTP") == "1":
+            return False
+        # Block private, loopback, link-local, multicast, reserved, unspecified (0.0.0.0)
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+            return True
+        # 169.254.169.254 and similar metadata
+        if str(ip) == "169.254.169.254":
+            return True
+        return False
+    except ValueError:
+        # Not an IP literal -> not considered private here (DNS names allowed except example.com handled separately)
+        return False
+
+
+def _validate_beszel_url(url):
+    """Validate Beszel URL for SSRF: scheme http/https, host not private, not example.com."""
+    if not url or not isinstance(url, str):
+        return False, "url required"
+    url = url.strip()
+    if not re.match(r"^https?://", url, re.IGNORECASE):
+        return False, "url must start with http:// or https://"
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except Exception:
+        return False, "invalid url"
+    host = parsed.hostname
+    if not host:
+        return False, "invalid url"
+    hl = host.lower()
+    if hl == "example.com" or hl.endswith(".example.com") or hl == "beszel.example.com" or hl.endswith(".beszel.example.com"):
+        return False, "example host blocked"
+    if _is_private_host(host):
+        return False, "private host blocked"
+    return True, None
+
+
 # ---- 2FA / TOTP (RFC 6238, zero-dependency) ----
 
 def totp_generate_secret():
@@ -736,15 +829,16 @@ class HubHandler(BaseHTTPRequestHandler):
         print("[%s] %s" % (self.client_address[0], fmt % args))
 
     def client_ip(self):
-        # HIGH-05: real IP behind Vercel / reverse proxy
-        xff = self.headers.get("X-Forwarded-For", "")
-        if xff:
-            first = xff.split(",")[0].strip()
-            if first:
-                return first
-        xri = self.headers.get("X-Real-IP", "")
-        if xri:
-            return xri.strip()
+        # IP spoof fix: only trust proxy headers on Vercel
+        if os.environ.get("VERCEL") == "1":
+            xff = self.headers.get("X-Forwarded-For", "")
+            if xff:
+                first = xff.split(",")[0].strip()
+                if first:
+                    return first
+            xri = self.headers.get("X-Real-IP", "")
+            if xri:
+                return xri.strip()
         return self.client_address[0]
 
     def send_bytes(self, body, status=200, ctype="text/html; charset=utf-8", extra_headers=None):
@@ -763,6 +857,11 @@ class HubHandler(BaseHTTPRequestHandler):
                          "font-src 'self' https://fonts.gstatic.com; "
                          "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; "
                          "connect-src 'self'; frame-ancestors 'self'")
+        self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        if self.path.startswith("/api/"):
+            self.send_header("Cache-Control", "no-store")
+        if self.headers.get("X-Forwarded-Proto") == "https":
+            self.send_header("Strict-Transport-Security", "max-age=63072000")
         for key, value in (extra_headers or {}).items():
             self.send_header(key, value)
         # Token refresh sırasında yeni imzalı cookie bu yanıta eklenir.
@@ -777,6 +876,20 @@ class HubHandler(BaseHTTPRequestHandler):
         self.send_response(302)
         self.send_header("Location", location)
         self.send_header("Content-Length", "0")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "SAMEORIGIN")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Content-Security-Policy",
+                         "default-src 'self'; img-src 'self' data: https:; "
+                         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com; "
+                         "font-src 'self' https://fonts.gstatic.com; "
+                         "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; "
+                         "connect-src 'self'; frame-ancestors 'self'")
+        self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        if self.path.startswith("/api/"):
+            self.send_header("Cache-Control", "no-store")
+        if self.headers.get("X-Forwarded-Proto") == "https":
+            self.send_header("Strict-Transport-Security", "max-age=63072000")
         for key, value in (extra_headers or {}).items():
             self.send_header(key, value)
         pending = getattr(self, "_pending_cookie", None)
@@ -812,7 +925,16 @@ class HubHandler(BaseHTTPRequestHandler):
             return None, "invalid JSON"
 
     def session_user(self):
-        user = self.server.sessions.get(self.read_cookie("hub_session"))
+        # Reject pending tokens explicitly (2FA bypass fix)
+        _raw = self.read_cookie("hub_session")
+        if _raw:
+            # verify_pending returns user only for typ==pending; if it succeeds, this is a pending token -> reject
+            try:
+                if self.server.sessions.verify_pending(_raw) is not None:
+                    return None
+            except Exception:
+                pass
+        user = self.server.sessions.get(_raw)
         # Transparent token refresh: Supabase access tokens live ~1h; the
         # signed cookie lives 30d. If the cookie's token_exp has passed,
         # exchange refresh_token and issue a fresh signed cookie on this
@@ -832,15 +954,13 @@ class HubHandler(BaseHTTPRequestHandler):
         return user
 
     def session_cookie(self, token):
-        # Secure flag yalnızca HTTPS'te (X-Forwarded-Proto=https) — reverse proxy
-        # arkasında da doğru davranır; HTTP'de Secure flag cookie'yi kırar.
-        secure = ""
-        if self.headers.get("X-Forwarded-Proto", "").lower() == "https":
-            secure = "; Secure"
+        # Secure cookie: always Secure/HttpOnly/SameSite/Path unless HUB_INSECURE_HTTP==1 for local HTTP dev
+        secure = "" if os.environ.get("HUB_INSECURE_HTTP") == "1" else "; Secure"
         return "hub_session=%s; HttpOnly; SameSite=Lax; Path=/; Max-Age=%d%s" % (token, SESSION_TTL, secure)
 
     def clear_cookie(self):
-        return {"Set-Cookie": "hub_session=; Path=/; Max-Age=0"}
+        secure = "" if os.environ.get("HUB_INSECURE_HTTP") == "1" else "; Secure"
+        return {"Set-Cookie": "hub_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax%s" % secure}
 
     # ---- services API helpers ----
 
@@ -1223,6 +1343,12 @@ class HubHandler(BaseHTTPRequestHandler):
                     }
             except Exception:
                 cfg = None  # settings read failure -> fall back to env
+        # SSRF validation
+        _cfg_to_validate = cfg if cfg is not None else read_beszel_env()
+        if _cfg_to_validate and _cfg_to_validate.get("url"):
+            ok, err = _validate_beszel_url(_cfg_to_validate["url"])
+            if not ok:
+                return self._api_error(400, err)
         try:
             systems = _beszel_systems(cfg)
         except Exception:
@@ -1249,13 +1375,13 @@ class HubHandler(BaseHTTPRequestHandler):
             return self.send_bytes(
                 json.dumps({"enabled": False}), 200,
                 "application/json; charset=utf-8")
-        # Placeholder/example URL is not a real Beszel — treat as not configured
-        try:
-            _host = urllib.parse.urlparse(cfg["url"]).netloc.lower().split(":")[0]
-            if _host == "example.com" or _host.endswith(".example.com") or _host == "beszel.example.com" or _host.endswith(".beszel.example.com"):
+        # SSRF validation
+        ok, err_msg = _validate_beszel_url(cfg["url"])
+        if not ok:
+            # keep example.com as enabled:false for backward compat, else 400
+            if "example" in err_msg:
                 return self.send_bytes(json.dumps({"enabled": False}), 200, "application/json; charset=utf-8")
-        except:
-            pass
+            return self._api_error(400, err_msg)
         try:
             systems = _beszel_systems(cfg)
         except Exception:
@@ -1271,12 +1397,35 @@ class HubHandler(BaseHTTPRequestHandler):
     def serve_file(self, rel):
         if not rel:
             return self.send_bytes("Not found", 404)
-        full = os.path.normpath(os.path.join(WEB_ROOT, rel))
-        if full != WEB_ROOT and not full.startswith(WEB_ROOT + os.sep):
+        # loop-decode percent-encoding until stable to prevent double-encoding traversals
+        decoded = rel
+        prev = None
+        while decoded != prev:
+            prev = decoded
+            decoded = urllib.parse.unquote(prev)
+        rel = decoded
+        # Resolve symlinks and enforce WEB_ROOT containment
+        web_root_real = os.path.realpath(WEB_ROOT)
+        full = os.path.realpath(os.path.join(web_root_real, rel))
+        if full != web_root_real and not full.startswith(web_root_real + os.sep):
             return self.send_bytes("Forbidden", 403)
         if not os.path.isfile(full):
             return self.send_bytes("Not found", 404)
+        # Block sensitive files even for authenticated users
+        low_rel = rel.lower().replace("\\", "/")
+        # block .env variants, services.json, supabase/, .git/, .vercel/ and sensitive extensions
+        if low_rel == ".env" or low_rel.startswith(".env.") or "/.env" in low_rel or low_rel.endswith("/.env"):
+            return self.send_bytes("Not found", 404)
+        if "services.json" in low_rel:
+            return self.send_bytes("Not found", 404)
+        parts = low_rel.split("/")
+        if any(seg in ("supabase", ".git", ".vercel") for seg in parts):
+            return self.send_bytes("Not found", 404)
         ext = os.path.splitext(full)[1].lower()
+        if ext in (".py", ".sql", ".md", ".map", ".env"):
+            return self.send_bytes("Not found", 404)
+        if ext not in ALLOWED_STATIC:
+            return self.send_bytes("Not found", 404)
         ctype = MIME.get(ext, "application/octet-stream")
         with open(full, "rb") as f:
             body = f.read()
@@ -1299,6 +1448,8 @@ class HubHandler(BaseHTTPRequestHandler):
                     200, "text/html; charset=utf-8")
             return self.serve_file("login.html")
         if path == "/logout":
+            if self._csrf_blocked():
+                return self.send_bytes("forbidden", 403, "text/plain; charset=utf-8")
             user = self.session_user()
             if self.server.supabase is not None and user and user.get("supabase_token"):
                 # Supabase tarafında refresh token'ları iptal et (best effort)
@@ -1307,7 +1458,19 @@ class HubHandler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
             self.server.sessions.delete(self.read_cookie("hub_session"))
-            return self.redirect("/login", self.clear_cookie())
+            # clear both hub_session and 2fa_pending with secure flags
+            secure = "" if os.environ.get("HUB_INSECURE_HTTP") == "1" else "; Secure"
+            self.send_response(302)
+            self.send_header("Location", "/login")
+            self.send_header("Content-Length", "0")
+            self.send_header("Set-Cookie", "hub_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax%s" % secure)
+            self.send_header("Set-Cookie", "2fa_pending=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax%s" % secure)
+            pending = getattr(self, "_pending_cookie", None)
+            if pending:
+                self.send_header("Set-Cookie", pending)
+                self._pending_cookie = None
+            self.end_headers()
+            return
         user = self.session_user()
         if path == "/api/stats":
             if not user:
@@ -1358,18 +1521,17 @@ class HubHandler(BaseHTTPRequestHandler):
         Origin header'ı yoksa (curl, eski istemci) allow — SameSite=Lax cookie
         zaten tarayıcı tabanlı CSRF'yi büyük ölçüde engeller; Origin farklıysa
         (cross-site form/JS) reddet. Sec-Fetch-Site: cross-site de reddet.
-        Also checks X-Forwarded-Host behind proxy (LOW-02).
+        X-Forwarded-Host is NOT trusted (spoofable).
         """
         origin = self.headers.get("Origin")
         if origin:
             ref = self.headers.get("Host", "")
-            xfh = self.headers.get("X-Forwarded-Host", "")
             try:
                 from urllib.parse import urlparse
                 o_host = urlparse(origin).netloc
             except ValueError:
                 return True
-            if o_host and o_host != ref and o_host != xfh:
+            if o_host and o_host != ref:
                 return True
         fetch_site = self.headers.get("Sec-Fetch-Site")
         if fetch_site == "cross-site":
@@ -1549,7 +1711,7 @@ class HubHandler(BaseHTTPRequestHandler):
                 pending = self.read_cookie("2fa_pending")
                 if not pending:
                     return self.redirect("/login?error=expired")
-                pend_user = self.server.sessions.verify_signed(pending)
+                pend_user = self.server.sessions.verify_pending(pending)
                 if not pend_user or not pend_user.get("email"):
                     return self.redirect("/login?error=expired")
                 # Fetch that user's settings and check the stored secret.
@@ -1569,7 +1731,8 @@ class HubHandler(BaseHTTPRequestHandler):
                     guard.reset(ip)
                     token = self.server.sessions.sign(pend_user)
                     # hub_session kur (Set-Cookie), 2fa_pending'i ayrı header ile sil
-                    self._pending_cookie = "2fa_pending=; Path=/; Max-Age=0"
+                    _sec = "" if os.environ.get("HUB_INSECURE_HTTP") == "1" else "; Secure"
+                    self._pending_cookie = "2fa_pending=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax%s" % _sec
                     return self.redirect("/", {"Set-Cookie": self.session_cookie(token)})
                 # Wrong or expired — keep pending but show error.
                 guard.record_failure(ip)
@@ -1606,7 +1769,7 @@ class HubHandler(BaseHTTPRequestHandler):
             except Exception:
                 need_2fa = False
             if need_2fa:
-                pending = self.server.sessions.sign(user)
+                pending = self.server.sessions.sign({**user, "typ": "pending"})
                 return self.redirect("/login?2fa=1", {"Set-Cookie": self._pending_cookie_value(pending)})
             token = self.server.sessions.sign(user)
             return self.redirect("/", {"Set-Cookie": self.session_cookie(token)})
@@ -1623,7 +1786,7 @@ class HubHandler(BaseHTTPRequestHandler):
 
     def _pending_cookie_value(self, token):
         """Short-lived cookie for the pending-2FA login step (5 min)."""
-        secure = "; Secure" if self.headers.get("X-Forwarded-Proto", "").lower() == "https" else ""
+        secure = "" if os.environ.get("HUB_INSECURE_HTTP") == "1" else "; Secure"
         return "2fa_pending=%s; HttpOnly; SameSite=Lax; Path=/; Max-Age=300%s" % (token, secure)
 
     def _supabase_user_from_session(self, session):

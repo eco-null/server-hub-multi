@@ -36,7 +36,7 @@ class SupabaseClient:
         self.auth_url = url.rstrip("/") + "/auth/v1"
         self.rest_url = url.rstrip("/") + "/rest/v1"
         self.anon_key = anon_key
-        self.service_role_key = service_role_key or anon_key
+        self.service_role_key = service_role_key if service_role_key else None
         self._connect_timeout = 10
 
     # ---- HTTP helpers ----
@@ -92,7 +92,9 @@ class SupabaseClient:
 
     def signup_bypass(self, email, password, username=None):
         """Bypass email rate limit: create user directly via SECURITY DEFINER RPC (auto-confirmed).
-        Requires service_role key (anon revoked per CRIT-03). Falls back to anon only when service_role == anon (local dev)."""
+        Requires service_role key (anon revoked). No fallback to anon."""
+        if not self.service_role_key:
+            raise SupabaseError(500, "service_role_key not configured")
         try:
             res = self._request(
                 self.rest_url + "/rpc/signup_bypass",
@@ -112,6 +114,8 @@ class SupabaseClient:
 
     def admin_create_user(self, email, password, username=None):
         """Create user via service_role admin API (bypasses rate limit, auto-confirmed)."""
+        if not self.service_role_key:
+            raise SupabaseError(500, "service_role_key not configured")
         body = {"email": email, "password": password, "email_confirm": True}
         if username:
             body["user_metadata"] = {"username": username}
@@ -124,9 +128,12 @@ class SupabaseClient:
         )
 
     def get_email_by_username(self, username):
-        """Resolve username -> email via SECURITY DEFINER RPC (for login with username)."""
+        """Resolve username -> email via SECURITY DEFINER RPC (for login with username).
+        Uses service_role when available (anon revoked in DB), else anon."""
         try:
-            res = self._request(self.rest_url + "/rpc/get_email_by_username", method="POST", body={"uname": username})
+            _key = self.service_role_key if self.service_role_key else self.anon_key
+            _token = self.service_role_key if self.service_role_key else None
+            res = self._request(self.rest_url + "/rpc/get_email_by_username", method="POST", body={"uname": username}, token=_token, headers={"apikey": _key})
             if isinstance(res, str):
                 return res
             if isinstance(res, dict) and "get_email_by_username" in res:
@@ -136,9 +143,11 @@ class SupabaseClient:
             return None
 
     def username_exists(self, username):
-        """Check if username exists (bypasses RLS)."""
+        """Check if username exists (bypasses RLS). Uses service_role when available."""
         try:
-            res = self._request(self.rest_url + "/rpc/username_exists", method="POST", body={"uname": username})
+            _key = self.service_role_key if self.service_role_key else self.anon_key
+            _token = self.service_role_key if self.service_role_key else None
+            res = self._request(self.rest_url + "/rpc/username_exists", method="POST", body={"uname": username}, token=_token, headers={"apikey": _key})
             if isinstance(res, bool):
                 return res
             if isinstance(res, dict) and "username_exists" in res:
