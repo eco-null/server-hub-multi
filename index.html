@@ -823,7 +823,7 @@
     return SERVICES;
   }
 
-  async function migrateLegacyServices() {
+  async function migrateLegacyServices(preFetched) {
     const legacyRaw = (() => {
       try { return JSON.parse((window.localStorage || localStorage).getItem(LS_SERVICES) || '[]'); }
       catch { return []; }
@@ -831,9 +831,10 @@
     const settingsServices = (window.HubSettings.get().services || []);
     const candidates = [...legacyRaw, ...settingsServices]
       .filter(s => s && s.name && s.url);
-    if (!candidates.length) return false;
+    if (!candidates.length) return Array.isArray(preFetched) ? preFetched : false;
     let serverList;
-    try { serverList = await fetchServices(); } catch { serverList = []; }
+    if (Array.isArray(preFetched)) { serverList = preFetched; }
+    else { try { serverList = await fetchServices(); } catch { serverList = []; } }
     const existing = new Set(serverList.map(s => s.url + '|' + s.name));
     let pushed = 0, failed = 0;
     for (const s of candidates) {
@@ -852,11 +853,14 @@
         if (r.ok) { pushed++; existing.add(key); } else failed++;
       } catch { failed++; }
     }
-    if (pushed > 0 && failed === 0) {
-      window.HubSettings.set({ services: [] });
-      try { (window.localStorage || localStorage).removeItem(LS_SERVICES); } catch {}
+    if (pushed > 0) {
+      if (failed === 0) {
+        window.HubSettings.set({ services: [] });
+        try { (window.localStorage || localStorage).removeItem(LS_SERVICES); } catch {}
+      }
+      try { const fresh = await fetchServices(); return fresh; } catch { return serverList; }
     }
-    return pushed > 0;
+    return serverList;
   }
 
   async function apiJson(method, url, body) {
@@ -1842,18 +1846,69 @@
   };
 
   /* ============================================================
-     Boot
+     Bootstrap cache + early fetch (performance without visual change)
+     ============================================================ */
+  const _BOOTSTRAP_CACHE_KEY = 'server-hub:bootstrap-cache';
+  const _BOOTSTRAP_TTL = 5*60*1000;
+  function _getCachedBootstrap(){ try{ const raw=localStorage.getItem(_BOOTSTRAP_CACHE_KEY); if(!raw) return null; const p=JSON.parse(raw); if(!p||typeof p.t!=='number'||!p.data) return null; if(Date.now()-p.t>_BOOTSTRAP_TTL){ try{localStorage.removeItem(_BOOTSTRAP_CACHE_KEY);}catch{} return null;} return p.data; }catch{ return null; } }
+  function _setCachedBootstrap(data){ try{ localStorage.setItem(_BOOTSTRAP_CACHE_KEY, JSON.stringify({t:Date.now(), data})); }catch{} }
+  const _bootstrapPromise = (function(){ try{ return fetch('/api/bootstrap', {credentials:'include', headers:{'Accept':'application/json'}, cache:'no-store'}).then(r=>r.ok?r.json():null).catch(()=>null); }catch{ return Promise.resolve(null); } })();
+  try{ window._hubBootstrapPromise = _bootstrapPromise; }catch{}
+
+  /* ============================================================
+     Boot — optimistic cache, bootstrap fast-path, parallel fallback
      ============================================================ */
   (async function boot() {
     try {
-      await migrateLegacyServices();           // pushes any legacy local links, clears local keys
-      SERVICES = await fetchServices(); _servicesVersion++;        // always re-fetch the authoritative list after migration
-      renderGroups();
-    } catch {
+      const cached = _getCachedBootstrap();
+      if (cached) {
+        let didRender = false;
+        if (Array.isArray(cached.services) && cached.services.length) {
+          SERVICES = cached.services; _servicesVersion++;
+          try{ renderGroups(); didRender = true; }catch{}
+        }
+        if (Array.isArray(cached.bookmarks)) { BOOKMARKS = cached.bookmarks; try{ renderBookmarks(); }catch{} }
+        if (cached.settings && window.HubSettings && typeof window.HubSettings._applyBootstrap === 'function') {
+          try{ window.HubSettings._applyBootstrap(cached.settings, cached.layout); }catch{}
+          try{ const s = window.HubSettings.get(); applyTheme(s.theme); window.HubSettings.apply(s); window.HubSettings.applyWallpaper(s); syncThemeToggle(); }catch{}
+        }
+        if (didRender) { try{ document.getElementById('skeletons').classList.add('hidden'); }catch{} }
+      }
+    } catch {}
+    let bootData = null;
+    try{ bootData = await _bootstrapPromise; }catch{ bootData = null; }
+    if (bootData && (Array.isArray(bootData.services) || Array.isArray(bootData.bookmarks) || bootData.settings)) {
+      try{
+        if (Array.isArray(bootData.services)){ SERVICES = bootData.services; _servicesVersion++; renderGroups(); try{ document.getElementById('skeletons').classList.add('hidden'); }catch{} }
+        if (Array.isArray(bootData.bookmarks)){ BOOKMARKS = bootData.bookmarks; renderBookmarks(); }
+        if (bootData.settings && window.HubSettings && typeof window.HubSettings._applyBootstrap === 'function'){
+          try{ window.HubSettings._applyBootstrap(bootData.settings, bootData.layout); }catch{}
+          try{ const s = window.HubSettings.get(); applyTheme(s.theme); window.HubSettings.apply(s); window.HubSettings.applyWallpaper(s); syncThemeToggle(); }catch{}
+        }
+        try{ _setCachedBootstrap(bootData); }catch{}
+      }catch{}
+      return;
+    }
+    try{
+      const bookmarksP = loadBookmarks().catch(()=>{});
+      const settingsP = (window.HubSettings && window.HubSettings.loadFromServer ? window.HubSettings.loadFromServer().catch(()=>null) : Promise.resolve(null));
+      let migratedList = null;
+      try{ migratedList = await migrateLegacyServices(Array.isArray(bootData && bootData.services) ? bootData.services : undefined); }catch{ migratedList = null; }
+      const servicesP = (Array.isArray(migratedList) ? Promise.resolve(migratedList) : fetchServices());
+      const services = await servicesP;
+      if (Array.isArray(services)){ SERVICES = services; _servicesVersion++; renderGroups(); try{ document.getElementById('skeletons').classList.add('hidden'); }catch{} }
+      try{ _setCachedBootstrap({ services: SERVICES, bookmarks: BOOKMARKS, settings: window.HubSettings.get(), layout: (_getCachedBootstrap()||{}).layout }); }catch{}
+      // parallel fallback: bookmarks + settings run concurrently with services (already started); use Promise.all for single RTT semantics
+      const [, remoteSettings] = await Promise.all([bookmarksP.catch(()=>{}), settingsP]);
+      try{ _setCachedBootstrap({ services: SERVICES, bookmarks: BOOKMARKS, settings: window.HubSettings.get(), layout: (_getCachedBootstrap()||{}).layout }); }catch{}
+      if (remoteSettings){
+        try{ applyTheme(remoteSettings.theme); window.HubSettings.apply(remoteSettings); window.HubSettings.applyWallpaper(remoteSettings); syncThemeToggle(); }catch{}
+        try{ _setCachedBootstrap({ services: SERVICES, bookmarks: BOOKMARKS, settings: window.HubSettings.get(), layout: (_getCachedBootstrap()||{}).layout }); }catch{}
+      }
+    } catch{
       document.getElementById('api-offline').classList.remove('hidden');
       renderGroups();
     }
-    loadBookmarks();
   })();
 </script>
 </body>

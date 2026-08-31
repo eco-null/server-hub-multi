@@ -22,6 +22,8 @@
  */
 
 const SETTINGS_KEY = 'server-hub:settings';
+const BOOTSTRAP_CACHE_KEY = 'server-hub:bootstrap-cache';
+const BOOTSTRAP_TTL = 5*60*1000;
 
 /* Storage shim — survives SecurityError on opaque origins (file://, sandbox,
  * private mode). Always returns a working storage; if localStorage throws,
@@ -105,6 +107,21 @@ function _sanitizeForLocal(settings) {
 }
 function _isValidHttpUrl(s) {
   try { const u = new URL(String(s)); return u.protocol === 'https:' || u.protocol === 'http:'; } catch { return false; }
+}
+function _updateBootstrapCacheWithSettings(nextSettings, layout) {
+  try {
+    let existing = null;
+    try {
+      const raw = safeStorage.getItem(BOOTSTRAP_CACHE_KEY);
+      if (raw) { const p = JSON.parse(raw); if (p && p.data) existing = p.data; }
+    } catch {}
+    const sanitized = _sanitizeForLocal(nextSettings);
+    const payload = existing ? { ...existing } : {};
+    payload.settings = sanitized;
+    if (layout !== undefined) payload.layout = layout;
+    else if (existing && existing.layout !== undefined) payload.layout = existing.layout;
+    try { safeStorage.setItem(BOOTSTRAP_CACHE_KEY, JSON.stringify({ t: Date.now(), data: payload })); } catch {}
+  } catch {}
 }
 
 function read() {
@@ -276,6 +293,7 @@ async function loadFromServer() {
         try { _readCacheRawStr = safeStorage.getItem(SETTINGS_KEY) || '{}'; _readCacheResult = next; _readCachePassword = _memoryBeszelPassword; } catch {}
       }
       emit(next);
+      try { _updateBootstrapCacheWithSettings(next, row && row.layout); } catch {}
       return next;
     } catch {
       if (attempt < 2) { await new Promise(r => setTimeout(r, 800 * (attempt + 1))); continue; }
@@ -283,6 +301,36 @@ async function loadFromServer() {
     }
   }
   return null;
+}
+function _applyBootstrap(settings, layout) {
+  if (!settings || typeof settings !== 'object') return null;
+  if (settings.beszel && typeof settings.beszel.password === 'string' && settings.beszel.password) {
+    _memoryBeszelPassword = settings.beszel.password;
+  }
+  const isEmptyRemote = Object.keys(settings).length === 0;
+  let next;
+  if (isEmptyRemote) {
+    const cur = read();
+    const hasLocalChanges = _stableStringify(_sanitizeForLocal(cur)) !== _stableStringify(_sanitizeForLocal(DEFAULTS));
+    if (hasLocalChanges) {
+      next = deepMerge(structuredCloneSafe(DEFAULTS), settings);
+      if (_memoryBeszelPassword) { next.beszel = next.beszel || {}; next.beszel.password = _memoryBeszelPassword; }
+      try { safeStorage.setItem(SETTINGS_KEY, JSON.stringify(_sanitizeForLocal(next))); } catch {}
+      _invalidateReadCache();
+      try { _readCacheRawStr = safeStorage.getItem(SETTINGS_KEY) || '{}'; _readCacheResult = next; _readCachePassword = _memoryBeszelPassword; } catch {}
+    } else {
+      next = cur;
+    }
+  } else {
+    next = deepMerge(structuredCloneSafe(DEFAULTS), settings);
+    if (_memoryBeszelPassword) { next.beszel = next.beszel || {}; next.beszel.password = _memoryBeszelPassword; }
+    try { safeStorage.setItem(SETTINGS_KEY, JSON.stringify(_sanitizeForLocal(next))); } catch {}
+    _invalidateReadCache();
+    try { _readCacheRawStr = safeStorage.getItem(SETTINGS_KEY) || '{}'; _readCacheResult = next; _readCachePassword = _memoryBeszelPassword; } catch {}
+  }
+  emit(next);
+  try { _updateBootstrapCacheWithSettings(next, layout); } catch {}
+  return next;
 }
 
 function subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); }
@@ -535,6 +583,7 @@ if (typeof window !== 'undefined') {
     apply,
     subscribe,
     loadFromServer,
+    _applyBootstrap,
     isDark,
     hexToRgba,
     GRADIENTS,

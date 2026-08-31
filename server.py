@@ -1031,6 +1031,120 @@ class HubHandler(BaseHTTPRequestHandler):
 
     # ---- per-user data endpoints ----
 
+    def _handle_bootstrap(self):
+        """Coalesced batch endpoint: services + bookmarks + settings + user in one RTT."""
+        supa, user = self._supa()
+        # Legacy mode: no Supabase — serve from local ServiceStore
+        if supa is None:
+            services = self.server.services.list()
+            bookmarks = self.server.services.list_bookmarks()
+            settings = {}
+            layout = {}
+            if isinstance(user, dict):
+                me = {"email": user.get("email") or user.get("username", ""), "username": user.get("username", ""), "user_id": user.get("user_id", "")}
+            elif isinstance(user, str):
+                me = {"email": user, "username": user, "user_id": ""}
+            else:
+                me = {"email": "", "username": "", "user_id": ""}
+            payload = {"services": services, "bookmarks": bookmarks, "settings": settings, "layout": layout, "user": me}
+            body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+            etag = '"' + hashlib.md5(body.encode("utf-8")).hexdigest() + '"'
+            if self.headers.get("If-None-Match") == etag:
+                self.send_response(304)
+                self.send_header("ETag", etag)
+                for k, v in _security_headers(self.path, self.headers.get("X-Forwarded-Proto") == "https"):
+                    if k.lower() != "etag":
+                        self.send_header(k, v)
+                self.end_headers()
+                return
+            return self.send_bytes(body, 200, "application/json; charset=utf-8", extra_headers={"ETag": etag})
+        # Supabase mode: fetch 3 resources in parallel
+        token = user.get("supabase_token", "") if isinstance(user, dict) else ""
+        results = {"services": None, "bookmarks": None, "settings_row": None}
+        errors = {}
+        lock = threading.Lock()
+
+        def _fetch_services():
+            try:
+                rows = supa.list_services(token)
+                with lock:
+                    results["services"] = rows
+            except Exception as e:
+                with lock:
+                    results["services"] = []
+                    errors["services"] = str(e)
+
+        def _fetch_bookmarks():
+            try:
+                rows = supa.list_bookmarks(token)
+                with lock:
+                    results["bookmarks"] = rows
+            except Exception as e:
+                with lock:
+                    results["bookmarks"] = []
+                    errors["bookmarks"] = str(e)
+
+        def _fetch_settings():
+            try:
+                row = supa.get_settings(token)
+                with lock:
+                    results["settings_row"] = row
+            except Exception as e:
+                with lock:
+                    results["settings_row"] = {}
+                    errors["settings"] = str(e)
+
+        threads = [
+            threading.Thread(target=_fetch_services, daemon=True),
+            threading.Thread(target=_fetch_bookmarks, daemon=True),
+            threading.Thread(target=_fetch_settings, daemon=True),
+        ]
+        for t in threads:
+            t.start()
+        # Join with overall timeout 8s per thread (remaining budget)
+        deadline = time.time() + 8.0
+        for t in threads:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                break
+            t.join(timeout=remaining)
+        svc_rows = results["services"] if isinstance(results["services"], list) else []
+        bm_rows = results["bookmarks"] if isinstance(results["bookmarks"], list) else []
+        row = results["settings_row"] if isinstance(results["settings_row"], dict) else {}
+        services = [_from_db_service(r) for r in svc_rows] if isinstance(svc_rows, list) else []
+        bookmarks = bm_rows
+        # Sanitize settings like _handle_settings_get does: strip beszel password and 2FA secret for privacy?
+        # Bootstrap keeps full settings/layout for client hydration but still strips secrets like settings GET does.
+        settings_val = (row.get("settings") or {}) if isinstance(row, dict) else {}
+        layout_val = (row.get("layout") or {}) if isinstance(row, dict) else {}
+        if isinstance(settings_val, dict):
+            # shallow copy to avoid mutating cached row
+            settings_val = dict(settings_val)
+            b = settings_val.get("beszel")
+            if isinstance(b, dict) and "password" in b:
+                b = dict(b)
+                b["password"] = ""
+                settings_val["beszel"] = b
+            t = settings_val.get("twofa")
+            if isinstance(t, dict):
+                t = dict(t)
+                t["secret"] = ""
+                t["enabled"] = bool(t.get("enabled"))
+                settings_val["twofa"] = t
+        user_info = {"email": user.get("email", ""), "username": user.get("username", ""), "user_id": user.get("user_id", "")} if isinstance(user, dict) else {"email": str(user), "username": str(user), "user_id": ""}
+        payload = {"services": services, "bookmarks": bookmarks, "settings": settings_val, "layout": layout_val, "user": user_info}
+        body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+        etag = '"' + hashlib.md5(body.encode("utf-8")).hexdigest() + '"'
+        if self.headers.get("If-None-Match") == etag:
+            self.send_response(304)
+            self.send_header("ETag", etag)
+            for k, v in _security_headers(self.path, self.headers.get("X-Forwarded-Proto") == "https"):
+                if k.lower() != "etag":
+                    self.send_header(k, v)
+            self.end_headers()
+            return
+        return self.send_bytes(body, 200, "application/json; charset=utf-8", extra_headers={"ETag": etag})
+
     def _handle_me(self):
         supa, user = self._supa()
         if supa is not None:
@@ -1538,6 +1652,10 @@ class HubHandler(BaseHTTPRequestHandler):
             if not user:
                 return self.send_bytes(json.dumps({"error": "unauthenticated"}), 401, "application/json; charset=utf-8")
             return self._handle_me()
+        if path == "/api/bootstrap":
+            if not user:
+                return self.send_bytes(json.dumps({"error": "unauthenticated"}), 401, "application/json; charset=utf-8")
+            return self._handle_bootstrap()
         if path == "/api/settings":
             if not user:
                 return self.send_bytes(json.dumps({"error": "unauthenticated"}), 401, "application/json; charset=utf-8")
