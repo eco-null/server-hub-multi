@@ -1598,7 +1598,8 @@
             return;
           }
           if (statsSection) statsSection.style.display = '';
-          renderBeszel(d.systems);
+          // handle multi-instance: d.systems (aggregated) or d.instances
+          renderBeszel(d.systems || d.instances || []);
           return;
         }
       }
@@ -1613,17 +1614,28 @@
     if (sec >= 60) { const m = Math.floor(sec / 60); const s = sec % 60; return s ? m + 'm ' + s + 's' : m + 'm'; }
     return Math.floor(sec) + 's';
   }
-  function renderBeszel(systems) {
+  function renderBeszel(systemsOrInstances) {
     gridEl.className = 'grid grid-cols-2 gap-3 sm:gap-4';
     gridEl.innerHTML = '';
     const showUptime = window.HubSettings.get().features.beszelUptime !== false;
+    // Handle both flat systems array and instances grouped {instances:[{name,systems}]}
+    let systems = systemsOrInstances;
+    if (systemsOrInstances && !Array.isArray(systemsOrInstances) && Array.isArray(systemsOrInstances.instances)) {
+      systems = systemsOrInstances.instances.flatMap(i => i.systems || []);
+    }
+    if (!Array.isArray(systems)) systems = [];
+    // If backend returns instances wrapper inside array elements containing .systems, flatten
+    if (systems.length && systems[0] && Array.isArray(systems[0].systems)) {
+      systems = systems.flatMap(i => i.systems || []);
+    }
     systems.forEach(s => {
       const up = formatUptime(s.uptime);
+      const label = s._instanceName ? esc(s._instanceName) + ' · ' + esc(s.name) : esc(s.name);
       const row = document.createElement('div');
       row.className = 'space-y-1';
       row.innerHTML =
         '<div class="flex items-baseline justify-between gap-2">' +
-          '<span class="text-xs text-[color:var(--fg-muted)] truncate" title="' + esc(s.host || '') + '">' + esc(s.name) + '</span>' +
+          '<span class="text-xs text-[color:var(--fg-muted)] truncate" title="' + esc(s.host || '') + '">' + label + '</span>' +
           '<span class="font-mono text-[10px] tabular-nums text-[color:var(--fg-muted)]">' + esc(s.status) + (showUptime && up ? ' · ' + up : '') + '</span>' +
         '</div>' +
         barRow('CPU', s.cpu) + barRow('Mem', s.mem) + barRow('Disk', s.disk);

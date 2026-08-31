@@ -76,15 +76,19 @@ const DEFAULTS = Object.freeze({
     user: '',
     password: '',
   },
+  beszels: [],
   services: [],
 });
 
-// --- beszel password kept only in memory and server, never in localStorage ---
-let _memoryBeszelPassword = '';
+// --- beszel passwords kept only in memory and server, never in localStorage ---
+let _memoryBeszelPasswords = new Map(); // id -> password, '__single__' for legacy single beszel
 // read() memoization — cache last raw string and parsed result
 let _readCacheRawStr = null;
 let _readCacheResult = null;
 let _readCachePassword = null;
+function _mapCacheKey() {
+  try { return JSON.stringify([..._memoryBeszelPasswords.entries()].sort((a,b)=>String(a[0]).localeCompare(String(b[0])))); } catch { return ''; }
+}
 // wallpaper helpers — cache DOM lookup + race guard
 let wallpaperElCache = null;
 let wallpaperSeq = 0;
@@ -98,10 +102,45 @@ function _invalidateReadCache() {
   _readCacheResult = null;
   _readCachePassword = null;
 }
+function _captureBeszelPasswordsFromRemote(remote) {
+  if (!remote || typeof remote !== 'object') return false;
+  let changed = false;
+  if (Array.isArray(remote.beszels)) {
+    remote.beszels.forEach(b => {
+      if (!b || typeof b.id !== 'string' || !b.id) return;
+      if (typeof b.password === 'string' && b.password) {
+        _memoryBeszelPasswords.set(b.id, b.password);
+        changed = true;
+      } else if ('password' in b) {
+        // empty string -> keep existing Map value, delete from remote so deepMerge keeps old
+        if (b.password === '' || b.password === null || b.password === undefined) {
+          delete b.password;
+        } else if (typeof b.password === 'string' && !b.password) {
+          delete b.password;
+        }
+      }
+    });
+  }
+  if (remote.beszel && typeof remote.beszel.password === 'string') {
+    if (remote.beszel.password) {
+      _memoryBeszelPasswords.set('__single__', remote.beszel.password);
+      changed = true;
+      // also sync to first beszels entry if present (legacy -> multi migration)
+      if (Array.isArray(remote.beszels) && remote.beszels[0] && typeof remote.beszels[0].id === 'string' && remote.beszels[0].id) {
+        _memoryBeszelPasswords.set(remote.beszels[0].id, remote.beszel.password);
+      }
+    } else if ('password' in remote.beszel) {
+      delete remote.beszel.password;
+    }
+  }
+  if (changed) _invalidateReadCache();
+  return changed;
+}
 function _sanitizeForLocal(settings) {
   try {
     const copy = JSON.parse(JSON.stringify(settings));
     if (copy && copy.beszel && 'password' in copy.beszel) delete copy.beszel.password;
+    if (copy && Array.isArray(copy.beszels)) copy.beszels.forEach(b => { if (b && 'password' in b) b.password = ''; });
     return copy;
   } catch { return settings; }
 }
@@ -127,29 +166,64 @@ function _updateBootstrapCacheWithSettings(nextSettings, layout) {
 function read() {
   let rawStr;
   try { rawStr = safeStorage.getItem(SETTINGS_KEY) || '{}'; } catch { rawStr = '{}'; }
-  if (rawStr === _readCacheRawStr && _readCacheResult !== null && _readCachePassword === _memoryBeszelPassword) {
+  const _curMapKey = _mapCacheKey();
+  if (rawStr === _readCacheRawStr && _readCacheResult !== null && _readCachePassword === _curMapKey) {
     return _readCacheResult;
   }
   try {
     const raw = JSON.parse(rawStr);
     const merged = deepMerge(structuredCloneSafe(DEFAULTS), raw);
-    if (_memoryBeszelPassword) {
+    // legacy beszel -> beszels migration: if raw has beszel with url and beszels empty/missing, create beszels array
+    const rawHasBeszelUrl = raw && raw.beszel && typeof raw.beszel.url === 'string' && raw.beszel.url.trim() !== '';
+    const rawBeszelsMissingOrEmpty = !raw || !Array.isArray(raw.beszels) || raw.beszels.length === 0;
+    const mergedBeszelsEmpty = !Array.isArray(merged.beszels) || merged.beszels.length === 0;
+    if (rawHasBeszelUrl && rawBeszelsMissingOrEmpty && mergedBeszelsEmpty) {
+      merged.beszels = [{ id: Math.random().toString(36).slice(2,10), name: "", url: raw.beszel.url, user: raw.beszel.user || "", password: "" }];
+    }
+    // re-inject passwords per beszels entry from Map
+    if (Array.isArray(merged.beszels)) {
+      merged.beszels.forEach(b => {
+        if (b && typeof b.id === 'string' && _memoryBeszelPasswords.has(b.id)) {
+          b.password = _memoryBeszelPasswords.get(b.id);
+        } else if (b && b.id && !_memoryBeszelPasswords.has(b.id) && 'password' in b && b.password) {
+          // sanitize stray non-empty password that wasn't captured (should be blanked)
+          b.password = '';
+        } else if (b && !b.id) {
+          // no id, cannot inject, ensure password blank if present
+          if ('password' in b && b.password) b.password = '';
+        }
+      });
+    }
+    // legacy single beszel password re-inject
+    if (_memoryBeszelPasswords.has('__single__')) {
       merged.beszel = merged.beszel || { url: '', user: '', password: '' };
-      merged.beszel.password = _memoryBeszelPassword;
+      merged.beszel.password = _memoryBeszelPasswords.get('__single__');
     } else if (merged.beszel && 'password' in merged.beszel) {
-      delete merged.beszel.password;
+      // ensure empty string when no stored password
+      merged.beszel.password = '';
+    } else if (merged.beszel && !('password' in merged.beszel)) {
       merged.beszel.password = '';
     }
     _readCacheRawStr = rawStr;
     _readCacheResult = merged;
-    _readCachePassword = _memoryBeszelPassword;
+    _readCachePassword = _curMapKey;
     return merged;
   } catch {
     const fallback = structuredCloneSafe(DEFAULTS);
-    if (_memoryBeszelPassword) fallback.beszel.password = _memoryBeszelPassword;
+    if (Array.isArray(fallback.beszels)) {
+      fallback.beszels.forEach(b => {
+        if (b && b.id && _memoryBeszelPasswords.has(b.id)) b.password = _memoryBeszelPasswords.get(b.id);
+      });
+    }
+    if (_memoryBeszelPasswords.has('__single__')) {
+      fallback.beszel = fallback.beszel || { url: '', user: '', password: '' };
+      fallback.beszel.password = _memoryBeszelPasswords.get('__single__');
+    } else if (fallback.beszel && 'password' in fallback.beszel) {
+      fallback.beszel.password = '';
+    }
     _readCacheRawStr = rawStr;
     _readCacheResult = fallback;
-    _readCachePassword = _memoryBeszelPassword;
+    _readCachePassword = _curMapKey;
     return fallback;
   }
 }
@@ -202,26 +276,73 @@ function _saveToServer(partial) {
 
 function set(partial) {
   const originalPartial = partial ? JSON.parse(JSON.stringify(partial)) : {};
-  // capture password to memory before sanitizing; empty string means keep existing
-  if (partial && partial.beszel && typeof partial.beszel.password === 'string') {
-    if (partial.beszel.password) {
-      _memoryBeszelPassword = partial.beszel.password;
-    } else if ('password' in partial.beszel) {
-      // empty password => don't overwrite stored password; strip key so deepMerge keeps old
-      const cleaned = { ...partial, beszel: { ...partial.beszel } };
-      delete cleaned.beszel.password;
-      partial = cleaned;
+  // Work on a clone so we can strip empty passwords before deepMerge
+  let working = partial ? JSON.parse(JSON.stringify(partial)) : {};
+  let mapChanged = false;
+  // capture beszels passwords: for each entry in partial.beszels
+  if (working && Array.isArray(working.beszels)) {
+    working.beszels.forEach((entry) => {
+      if (!entry || typeof entry !== 'object') return;
+      const origEntry = Array.isArray(originalPartial.beszels)
+        ? originalPartial.beszels.find(e => e && e.id === entry.id)
+        : null;
+      if (typeof entry.password === 'string' && entry.password) {
+        if (entry.id) { _memoryBeszelPasswords.set(entry.id, entry.password); mapChanged = true; }
+      } else {
+        // password === "" or missing -> keep old Map value and delete password from partial before deepMerge
+        if ('password' in entry) delete entry.password;
+        if (origEntry && 'password' in origEntry) delete origEntry.password;
+      }
+    });
+  } else if (Array.isArray(originalPartial.beszels)) {
+    // clean empty passwords from server payload even if working has no beszels (edge)
+    originalPartial.beszels.forEach(entry => {
+      if (!entry) return;
+      if (typeof entry.password === 'string' && entry.password === '') delete entry.password;
+      else if (!('password' in entry) || entry.password === undefined) { if ('password' in entry) delete entry.password; }
+    });
+  }
+  // capture legacy single beszel password and sync to first beszels entry
+  if (working && working.beszel && typeof working.beszel.password === 'string') {
+    if (working.beszel.password) {
+      _memoryBeszelPasswords.set('__single__', working.beszel.password);
+      mapChanged = true;
+      // sync to first beszels entry id if available
+      let targetId = null;
+      if (Array.isArray(working.beszels) && working.beszels[0] && working.beszels[0].id) targetId = working.beszels[0].id;
+      else if (Array.isArray(originalPartial.beszels) && originalPartial.beszels[0] && originalPartial.beszels[0].id) targetId = originalPartial.beszels[0].id;
+      if (targetId) { _memoryBeszelPasswords.set(targetId, working.beszel.password); }
+    } else if ('password' in working.beszel) {
+      delete working.beszel.password;
+      if (originalPartial && originalPartial.beszel && 'password' in originalPartial.beszel) delete originalPartial.beszel.password;
+      // also strip empty password from first beszels entry if it mirrored legacy
+      if (Array.isArray(working.beszels) && working.beszels[0] && 'password' in working.beszels[0] && working.beszels[0].password === '') {
+        delete working.beszels[0].password;
+      }
+      if (Array.isArray(originalPartial.beszels) && originalPartial.beszels[0] && 'password' in originalPartial.beszels[0] && originalPartial.beszels[0].password === '') {
+        delete originalPartial.beszels[0].password;
+      }
     }
   }
+  if (mapChanged) _invalidateReadCache();
   const cur = read();
-  const next = deepMerge(cur, partial);
-  if (_memoryBeszelPassword) {
+  const next = deepMerge(cur, working);
+  // re-inject Map passwords into next for current session
+  if (Array.isArray(next.beszels)) {
+    next.beszels.forEach(b => {
+      if (b && b.id && _memoryBeszelPasswords.has(b.id)) b.password = _memoryBeszelPasswords.get(b.id);
+      else if (b && 'password' in b && b.password && b.id && !_memoryBeszelPasswords.has(b.id)) b.password = '';
+    });
+  }
+  if (_memoryBeszelPasswords.has('__single__')) {
     next.beszel = next.beszel || { url: '', user: '', password: '' };
-    next.beszel.password = _memoryBeszelPassword;
+    next.beszel.password = _memoryBeszelPasswords.get('__single__');
+  } else if (next.beszel && 'password' in next.beszel) {
+    next.beszel.password = '';
   }
   try { safeStorage.setItem(SETTINGS_KEY, JSON.stringify(_sanitizeForLocal(next))); } catch {}
   _invalidateReadCache();
-  try { _readCacheRawStr = safeStorage.getItem(SETTINGS_KEY) || '{}'; _readCacheResult = next; _readCachePassword = _memoryBeszelPassword; } catch {}
+  try { _readCacheRawStr = safeStorage.getItem(SETTINGS_KEY) || '{}'; _readCacheResult = next; _readCachePassword = _mapCacheKey(); } catch {}
   _saveToServer(originalPartial);
   emit(next);
   return next;
@@ -258,10 +379,8 @@ async function loadFromServer() {
       const row = await resp.json();
       const remote = (row && (row.settings || row)) || null;
       if (!remote || typeof remote !== 'object') return null;
-      // capture beszel password into memory before sanitizing
-      if (remote && remote.beszel && typeof remote.beszel.password === 'string' && remote.beszel.password) {
-        _memoryBeszelPassword = remote.beszel.password;
-      }
+      // capture beszels and legacy beszel passwords into Map before sanitizing
+      _captureBeszelPasswordsFromRemote(remote);
       // If remote is empty (new user), don't keep old user's local settings — reset to defaults first
       const isEmptyRemote = Object.keys(remote).length === 0;
       let next;
@@ -271,10 +390,12 @@ async function loadFromServer() {
         const hasLocalChanges = _stableStringify(_sanitizeForLocal(cur)) !== _stableStringify(_sanitizeForLocal(DEFAULTS));
         if (hasLocalChanges) {
           next = deepMerge(structuredCloneSafe(DEFAULTS), remote);
-          if (_memoryBeszelPassword) { next.beszel = next.beszel || {}; next.beszel.password = _memoryBeszelPassword; }
+          if (Array.isArray(next.beszels)) next.beszels.forEach(b => { if (b && b.id && _memoryBeszelPasswords.has(b.id)) b.password = _memoryBeszelPasswords.get(b.id); });
+          if (_memoryBeszelPasswords.has('__single__')) { next.beszel = next.beszel || {}; next.beszel.password = _memoryBeszelPasswords.get('__single__'); }
+          else if (next.beszel && 'password' in next.beszel) next.beszel.password = '';
           try { safeStorage.setItem(SETTINGS_KEY, JSON.stringify(_sanitizeForLocal(next))); } catch {}
           _invalidateReadCache();
-          try { _readCacheRawStr = safeStorage.getItem(SETTINGS_KEY) || '{}'; _readCacheResult = next; _readCachePassword = _memoryBeszelPassword; } catch {}
+          try { _readCacheRawStr = safeStorage.getItem(SETTINGS_KEY) || '{}'; _readCacheResult = next; _readCachePassword = _mapCacheKey(); } catch {}
         } else {
           next = cur;
         }
@@ -283,14 +404,16 @@ async function loadFromServer() {
         // deepMerge(cur, remote) kept stale local keys; instead build from defaults+remote
         // and replace top-level keys wholesale so removed keys are deleted.
         next = deepMerge(structuredCloneSafe(DEFAULTS), remote);
-        if (_memoryBeszelPassword) { next.beszel = next.beszel || {}; next.beszel.password = _memoryBeszelPassword; }
+        if (Array.isArray(next.beszels)) next.beszels.forEach(b => { if (b && b.id && _memoryBeszelPasswords.has(b.id)) b.password = _memoryBeszelPasswords.get(b.id); });
+        if (_memoryBeszelPasswords.has('__single__')) { next.beszel = next.beszel || {}; next.beszel.password = _memoryBeszelPasswords.get('__single__'); }
+        else if (next.beszel && 'password' in next.beszel) next.beszel.password = '';
         // Also handle case where remote explicitly deleted a top-level key that exists in cur
         // (already covered because we start from DEFAULTS not cur). For safety, also
         // ensure any non-default top-level key in cur not present in remote is removed
         // (next already doesn't have it).
         try { safeStorage.setItem(SETTINGS_KEY, JSON.stringify(_sanitizeForLocal(next))); } catch {}
         _invalidateReadCache();
-        try { _readCacheRawStr = safeStorage.getItem(SETTINGS_KEY) || '{}'; _readCacheResult = next; _readCachePassword = _memoryBeszelPassword; } catch {}
+        try { _readCacheRawStr = safeStorage.getItem(SETTINGS_KEY) || '{}'; _readCacheResult = next; _readCachePassword = _mapCacheKey(); } catch {}
       }
       emit(next);
       try { _updateBootstrapCacheWithSettings(next, row && row.layout); } catch {}
@@ -304,9 +427,7 @@ async function loadFromServer() {
 }
 function _applyBootstrap(settings, layout) {
   if (!settings || typeof settings !== 'object') return null;
-  if (settings.beszel && typeof settings.beszel.password === 'string' && settings.beszel.password) {
-    _memoryBeszelPassword = settings.beszel.password;
-  }
+  _captureBeszelPasswordsFromRemote(settings);
   const isEmptyRemote = Object.keys(settings).length === 0;
   let next;
   if (isEmptyRemote) {
@@ -314,19 +435,23 @@ function _applyBootstrap(settings, layout) {
     const hasLocalChanges = _stableStringify(_sanitizeForLocal(cur)) !== _stableStringify(_sanitizeForLocal(DEFAULTS));
     if (hasLocalChanges) {
       next = deepMerge(structuredCloneSafe(DEFAULTS), settings);
-      if (_memoryBeszelPassword) { next.beszel = next.beszel || {}; next.beszel.password = _memoryBeszelPassword; }
+      if (Array.isArray(next.beszels)) next.beszels.forEach(b => { if (b && b.id && _memoryBeszelPasswords.has(b.id)) b.password = _memoryBeszelPasswords.get(b.id); });
+      if (_memoryBeszelPasswords.has('__single__')) { next.beszel = next.beszel || {}; next.beszel.password = _memoryBeszelPasswords.get('__single__'); }
+      else if (next.beszel && 'password' in next.beszel) next.beszel.password = '';
       try { safeStorage.setItem(SETTINGS_KEY, JSON.stringify(_sanitizeForLocal(next))); } catch {}
       _invalidateReadCache();
-      try { _readCacheRawStr = safeStorage.getItem(SETTINGS_KEY) || '{}'; _readCacheResult = next; _readCachePassword = _memoryBeszelPassword; } catch {}
+      try { _readCacheRawStr = safeStorage.getItem(SETTINGS_KEY) || '{}'; _readCacheResult = next; _readCachePassword = _mapCacheKey(); } catch {}
     } else {
       next = cur;
     }
   } else {
     next = deepMerge(structuredCloneSafe(DEFAULTS), settings);
-    if (_memoryBeszelPassword) { next.beszel = next.beszel || {}; next.beszel.password = _memoryBeszelPassword; }
+    if (Array.isArray(next.beszels)) next.beszels.forEach(b => { if (b && b.id && _memoryBeszelPasswords.has(b.id)) b.password = _memoryBeszelPasswords.get(b.id); });
+    if (_memoryBeszelPasswords.has('__single__')) { next.beszel = next.beszel || {}; next.beszel.password = _memoryBeszelPasswords.get('__single__'); }
+    else if (next.beszel && 'password' in next.beszel) next.beszel.password = '';
     try { safeStorage.setItem(SETTINGS_KEY, JSON.stringify(_sanitizeForLocal(next))); } catch {}
     _invalidateReadCache();
-    try { _readCacheRawStr = safeStorage.getItem(SETTINGS_KEY) || '{}'; _readCacheResult = next; _readCachePassword = _memoryBeszelPassword; } catch {}
+    try { _readCacheRawStr = safeStorage.getItem(SETTINGS_KEY) || '{}'; _readCacheResult = next; _readCachePassword = _mapCacheKey(); } catch {}
   }
   emit(next);
   try { _updateBootstrapCacheWithSettings(next, layout); } catch {}
@@ -338,7 +463,7 @@ function subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); }
 function clear() {
   try { clearTimeout(_syncTimer); } catch {}
   _syncTimer = null;
-  _memoryBeszelPassword = '';
+  _memoryBeszelPasswords.clear();
   try { safeStorage.removeItem(SETTINGS_KEY); } catch {}
   try { safeStorage.removeItem('server-hub:services'); } catch {}
   try { safeStorage.removeItem('server-hub:theme'); } catch {}
@@ -346,7 +471,7 @@ function clear() {
   const next = structuredCloneSafe(DEFAULTS);
   _readCacheRawStr = '{}';
   _readCacheResult = next;
-  _readCachePassword = _memoryBeszelPassword;
+  _readCachePassword = _mapCacheKey();
   emit(next);
   return next;
 }

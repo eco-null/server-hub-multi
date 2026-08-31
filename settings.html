@@ -307,33 +307,18 @@
         <!-- Rendered by JS -->
       </div>
 
-      <!-- System stats source (Beszel) -->
+      <!-- System stats source (Beszel) - multi-instance -->
       <div class="pt-3 mt-3 border-t border-[color:var(--border)]">
         <div class="flex items-center justify-between gap-3">
           <div class="min-w-0">
-            <p class="text-sm font-medium">System stats source</p>
-            <p id="beszel-status" class="text-xs text-[color:var(--fg-muted)] mt-0.5">Checking Beszel…</p>
-          </div>
-          <button id="beszel-test" class="btn focus-ring text-xs shrink-0">Test connection</button>
-        </div>
-        <div class="grid gap-3 mt-3">
-          <label class="block">
-            <span class="text-xs text-[color:var(--fg-muted)]">Beszel URL</span>
-            <input id="beszel-url" class="field mt-1.5" type="text" placeholder="https://beszel.example.com" autocomplete="off" inputmode="url" />
-          </label>
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <label class="block">
-              <span class="text-xs text-[color:var(--fg-muted)]">Username</span>
-              <input id="beszel-user" class="field mt-1.5" type="text" placeholder="admin" autocomplete="username" />
-            </label>
-            <label class="block">
-              <span class="text-xs text-[color:var(--fg-muted)]">Password</span>
-              <input id="beszel-password" class="field mt-1.5" type="password" placeholder="••••••••" autocomplete="current-password" />
-            </label>
+            <p class="text-sm font-medium">System stats sources</p>
+            <p class="text-xs text-[color:var(--fg-muted)] mt-0.5">Add one or more Beszel hubs. Credentials are stored encrypted in your settings.</p>
           </div>
         </div>
+        <div id="beszel-list" class="space-y-3 mt-3"></div>
+        <button id="beszel-add" class="btn focus-ring text-xs mt-3">+ Add Beszel</button>
         <p class="text-xs text-[color:var(--fg-muted)] mt-2">
-          Your Beszel credentials are stored encrypted in your own settings, never in the browser.
+          Blank password keeps the saved value. Test per instance before saving.
         </p>
       </div>
     </section>
@@ -706,16 +691,14 @@
   renderFeatures();
 
   /* ============================================================
-     Beszel connection status + test (server-side env config)
+     Beszel multi-instance (dynamic list)
      ============================================================ */
-  const beszelStatusEl = document.getElementById('beszel-status');
-  const beszelTestBtn  = document.getElementById('beszel-test');
-  const beszelUrl      = document.getElementById('beszel-url');
-  const beszelUser     = document.getElementById('beszel-user');
-  const beszelPassword = document.getElementById('beszel-password');
+  const beszelListEl = document.getElementById('beszel-list');
+  const beszelAddBtn = document.getElementById('beszel-add');
   const BESZEL_TONES = ['text-[color:var(--green)]', 'text-[color:var(--red)]'];
 
-  // Güvenli JSON: server HTML/empty dönerse (ör. Vercel 504) anlamlı hata ver.
+  function beszelId() { return Math.random().toString(36).slice(2,10); }
+
   async function safeJson(r) {
     const text = await r.text();
     try { return JSON.parse(text); }
@@ -724,125 +707,186 @@
     }
   }
 
-  // Load per-user Beszel credentials from server-side settings into the form
-  // (password stays blank — stored value is only used by the server; blank
-  // means "keep saved password").
+  function setBeszelStatus(row, text, tone) {
+    const el = row ? row.querySelector('.beszel-status') : null;
+    if (!el) return;
+    el.classList.remove(...BESZEL_TONES);
+    if (tone === 'ok') el.classList.add('text-[color:var(--green)]');
+    if (tone === 'bad') el.classList.add('text-[color:var(--red)]');
+    el.textContent = text;
+  }
+
+  function collectFromDOM() {
+    const rows = beszelListEl ? beszelListEl.querySelectorAll('[data-beszel-id]') : [];
+    const out = [];
+    rows.forEach(row => {
+      const id = row.getAttribute('data-beszel-id') || beszelId();
+      const name = (row.querySelector('.beszel-name')?.value || '').trim();
+      const url = (row.querySelector('.beszel-url')?.value || '').trim();
+      const user = (row.querySelector('.beszel-user')?.value || '').trim();
+      const pwEl = row.querySelector('.beszel-password');
+      const password = pwEl ? pwEl.value : '';
+      // keep empty password as "" so set() can preserve old value per id
+      out.push({ id, name, url, user, password });
+    });
+    return out;
+  }
+
+  let beszelSaveTimer = null;
+  function scheduleBeszelSave() {
+    clearTimeout(beszelSaveTimer);
+    beszelSaveTimer = setTimeout(() => {
+      const beszels = collectFromDOM();
+      // allow saving even if some urls empty; filter empty handled by server, but keep local state
+      S.set({ beszels });
+      toast('Beszel saved');
+    }, 900);
+  }
+
+  function isPlaceholderUrl(url) {
+    if (!url) return true;
+    try {
+      const h = new URL(url).host.toLowerCase().split(':')[0];
+      return h === 'example.com' || h.endsWith('.example.com') || h === 'beszel.example.com' || h.endsWith('.beszel.example.com');
+    } catch {
+      return url === 'https://beszel.example.com' || url.includes('example.com');
+    }
+  }
+
+  async function testBeszelRow(row, showToast) {
+    const url = (row.querySelector('.beszel-url')?.value || '').trim();
+    const user = (row.querySelector('.beszel-user')?.value || '').trim();
+    const password = row.querySelector('.beszel-password')?.value || '';
+    const btn = row.querySelector('.beszel-test');
+    const placeholder = isPlaceholderUrl(url);
+    if (btn) btn.disabled = true;
+    setBeszelStatus(row, 'Checking…', 'info');
+    let msg = '';
+    try {
+      if (url && !placeholder) {
+        const r = await fetch('/api/beszel', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url, user, password }),
+        });
+        const d = await safeJson(r);
+        if (!r.ok) throw new Error(d.error || 'request failed (' + r.status + ')');
+        if (d.enabled && d.error) { msg = 'Beszel: error — ' + d.error; setBeszelStatus(row, msg, 'bad'); }
+        else if (d.enabled) { const n=(d.systems||[]).length; msg='Beszel: connected — ' + n + ' server' + (n===1?'':'s'); setBeszelStatus(row, msg, 'ok'); }
+        else { msg='Beszel: not configured'; setBeszelStatus(row, msg, 'info'); }
+      } else if (placeholder && url) {
+        msg='Beszel: not configured'; setBeszelStatus(row, msg, 'info');
+      } else {
+        // fallback: check combined status
+        const r = await fetch('/api/beszel', { cache: 'no-store' });
+        const d = await safeJson(r);
+        if (!r.ok) throw new Error(d.error || 'request failed (' + r.status + ')');
+        if (d.enabled && d.error) { msg='Beszel: error — ' + d.error; setBeszelStatus(row, msg, 'bad'); }
+        else if (d.enabled) { const n=(d.systems||[]).length; msg='Beszel: connected — ' + n + ' server' + (n===1?'':'s'); setBeszelStatus(row, msg, 'ok'); }
+        else { msg='Beszel: not configured (add your Beszel URL above)'; setBeszelStatus(row, msg, 'info'); }
+      }
+    } catch (err) {
+      if (placeholder) { msg='Beszel: not configured'; setBeszelStatus(row, msg, 'info'); }
+      else { msg='Beszel: error — ' + err.message; setBeszelStatus(row, msg, 'bad'); }
+    } finally {
+      if (btn) btn.disabled = false;
+      if (showToast && msg) toast(msg);
+    }
+  }
+
+  function renderBeszels() {
+    const s = S.get();
+    let list = Array.isArray(s.beszels) ? s.beszels : [];
+    // legacy migration display: if beszels empty but beszel.url exists, show it
+    if (!list.length && s.beszel && s.beszel.url) {
+      list = [{ id: beszelId(), name: '', url: s.beszel.url, user: s.beszel.user || '', password: s.beszel.password || '' }];
+    }
+    beszelListEl.innerHTML = '';
+    if (!list.length) {
+      beszelListEl.innerHTML = '<p class="text-xs text-[color:var(--fg-muted)] py-2">No Beszel hubs yet. Click “+ Add Beszel”.</p>';
+      return;
+    }
+    list.forEach(entry => {
+      const id = entry.id || beszelId();
+      const row = document.createElement('div');
+      row.className = 'glass p-4 rounded-xl space-y-3';
+      row.setAttribute('data-beszel-id', id);
+      row.innerHTML =
+        '<div class="flex items-center justify-between gap-2">' +
+          '<input class="field focus-ring flex-1 beszel-name" placeholder="Name (e.g. Home Lab)" value="' + esc(entry.name||'') + '" />' +
+          '<button class="btn btn-danger focus-ring text-xs beszel-delete shrink-0" aria-label="Delete Beszel">✕</button>' +
+        '</div>' +
+        '<span class="beszel-status text-xs text-[color:var(--fg-muted)] block">Idle — Test to verify</span>' +
+        '<div class="grid gap-3">' +
+          '<label class="block"><span class="text-xs text-[color:var(--fg-muted)]">Beszel URL</span><input class="field mt-1.5 beszel-url" type="text" placeholder="https://beszel.example.com" autocomplete="off" inputmode="url" value="' + esc(entry.url||'') + '" /></label>' +
+          '<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">' +
+            '<label class="block"><span class="text-xs text-[color:var(--fg-muted)]">Username</span><input class="field mt-1.5 beszel-user" type="text" placeholder="admin" autocomplete="username" value="' + esc(entry.user||'') + '" /></label>' +
+            '<label class="block"><span class="text-xs text-[color:var(--fg-muted)]">Password</span><input class="field mt-1.5 beszel-password" type="password" placeholder="••••••••" autocomplete="current-password" value="" /></label>' +
+          '</div>' +
+        '</div>' +
+        '<div class="flex justify-end"><button class="btn focus-ring text-xs beszel-test shrink-0">Test connection</button></div>';
+      beszelListEl.appendChild(row);
+      const delBtn = row.querySelector('.beszel-delete');
+      const testBtn = row.querySelector('.beszel-test');
+      const inputs = row.querySelectorAll('.beszel-name, .beszel-url, .beszel-user, .beszel-password');
+      inputs.forEach(el => {
+        el.addEventListener('input', scheduleBeszelSave);
+        el.addEventListener('change', scheduleBeszelSave);
+      });
+      if (delBtn) delBtn.addEventListener('click', () => {
+        row.remove();
+        // if list becomes empty, show placeholder
+        if (!beszelListEl.querySelector('[data-beszel-id]')) renderBeszels();
+        scheduleBeszelSave();
+        // immediate save without debounce when deleting last item to clear server
+        clearTimeout(beszelSaveTimer);
+        const remain = collectFromDOM();
+        S.set({ beszels: remain });
+        toast('Beszel removed');
+      });
+      if (testBtn) testBtn.addEventListener('click', () => testBeszelRow(row, true));
+    });
+  }
+
+  // Add new empty Beszel
+  if (beszelAddBtn) beszelAddBtn.addEventListener('click', () => {
+    const s = S.get();
+    const cur = Array.isArray(s.beszels) ? s.beszels.slice() : [];
+    cur.push({ id: beszelId(), name: '', url: '', user: '', password: '' });
+    S.set({ beszels: cur });
+    renderBeszels();
+    // focus name of last row
+    const rows = beszelListEl.querySelectorAll('[data-beszel-id]');
+    const last = rows[rows.length-1];
+    if (last) last.querySelector('.beszel-name')?.focus();
+    toast('Beszel added — fill details');
+  });
+
+  // initial load from server then render (passwords stay blank)
   (async () => {
     try {
       const r = await fetch('/api/settings', { headers: { 'Accept': 'application/json' } });
       if (r.ok) {
         const d = await safeJson(r);
-        const b = (d.settings && d.settings.beszel) || {};
-        if (b.url)  beszelUrl.value = b.url;
-        if (b.user) beszelUser.value = b.user;
+        const settings = (d.settings || {});
+        let incoming = [];
+        if (Array.isArray(settings.beszels) && settings.beszels.length) incoming = settings.beszels;
+        else if (settings.beszel && settings.beszel.url) incoming = [{ id: beszelId(), name: '', url: settings.beszel.url, user: settings.beszel.user || '', password: '' }];
+        // merge into local S without password
+        if (incoming.length) {
+          const cur = S.get();
+          // only update if local is empty or different length to avoid overwriting unsaved edits
+          if (!Array.isArray(cur.beszels) || cur.beszels.length !== incoming.length) {
+            // preserve local ids where possible? just set
+            S.set({ beszels: incoming.map(e=>({ id: e.id || beszelId(), name: e.name||'', url: e.url||'', user: e.user||'', password: '' })) });
+          }
+        }
       }
     } catch {}
-    checkBeszel(false);
+    renderBeszels();
   })();
-
-  function setBeszelStatus(text, tone) {
-    beszelStatusEl.classList.remove(...BESZEL_TONES);
-    if (tone === 'ok') beszelStatusEl.classList.add('text-[color:var(--green)]');
-    if (tone === 'bad') beszelStatusEl.classList.add('text-[color:var(--red)]');
-    beszelStatusEl.textContent = text;
-  }
-
-  async function checkBeszel(showToast) {
-    const testUrl = beszelUrl.value.trim();
-    // Placeholder/example URLs are not real Beszel — treat as not configured without network request (HIGH-04: exact host check)
-    let isPlaceholder = !testUrl;
-    try {
-      const h = new URL(testUrl).host.toLowerCase().split(':')[0];
-      isPlaceholder = isPlaceholder || h === 'example.com' || h.endsWith('.example.com') || h === 'beszel.example.com' || h.endsWith('.beszel.example.com');
-    } catch {
-      isPlaceholder = isPlaceholder || testUrl === 'https://beszel.example.com' || testUrl.includes('example.com');
-    }
-    const msgEl = beszelStatusEl;
-    beszelTestBtn.disabled = true;
-    msgEl.textContent = 'Checking Beszel…';
-    let msg = '';
-    try {
-      if (testUrl && !isPlaceholder) {
-        const r = await fetch('/api/beszel', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            url: testUrl,
-            user: beszelUser.value.trim(),
-            password: beszelPassword.value,
-          }),
-        });
-        const d = await safeJson(r);
-        if (!r.ok) throw new Error(d.error || 'request failed (' + r.status + ')');
-        if (d.enabled && d.error) {
-          msg = 'Beszel: error — ' + d.error;
-          setBeszelStatus(msg, 'bad');
-        } else if (d.enabled) {
-          const n = (d.systems || []).length;
-          msg = 'Beszel: connected — ' + n + ' server' + (n === 1 ? '' : 's');
-          setBeszelStatus(msg, 'ok');
-        } else {
-          msg = 'Beszel: not configured';
-          setBeszelStatus(msg, 'info');
-        }
-      } else if (isPlaceholder && testUrl) {
-        msg = 'Beszel: not configured';
-        setBeszelStatus(msg, 'info');
-      } else {
-        const r = await fetch('/api/beszel', { cache: 'no-store' });
-        const d = await safeJson(r);
-        if (!r.ok) throw new Error(d.error || 'request failed (' + r.status + ')');
-        if (d.enabled && d.error) {
-          // Server says enabled but unreachable — hide error if user never configured Beszel
-          const isEmptyConfig = !testUrl;
-          if (isEmptyConfig) {
-            msg = 'Beszel: not configured';
-            setBeszelStatus(msg, 'info');
-          } else {
-            msg = 'Beszel: error — ' + d.error;
-            setBeszelStatus(msg, 'bad');
-          }
-        } else if (d.enabled) {
-          const n = (d.systems || []).length;
-          msg = 'Beszel: connected — ' + n + ' server' + (n === 1 ? '' : 's');
-          setBeszelStatus(msg, 'ok');
-        } else {
-          msg = 'Beszel: not configured (add your Beszel URL above)' ;
-          setBeszelStatus(msg, 'info');
-        }
-      }
-    } catch (err) {
-      // Vercel 500 FUNCTION_INVOCATION_FAILED is HTML, not JSON — treat as not configured when URL is placeholder/empty
-      if (isPlaceholder) {
-        msg = 'Beszel: not configured';
-        setBeszelStatus(msg, 'info');
-      } else {
-        msg = 'Beszel: error — ' + err.message;
-        setBeszelStatus(msg, 'bad');
-      }
-    } finally {
-      beszelTestBtn.disabled = false;
-      if (showToast) toast(msg);
-    }
-  }
-  beszelTestBtn.addEventListener('click', () => checkBeszel(true));
-
-  // Kaydet: Beszel credentials'ı kullanıcının settings'ine yaz (debounce).
-  // Password boşsa mevcut değeri koru — server tarafında merged gibi davranır.
-  let beszelSaveTimer = null;
-  function scheduleBeszelSave() {
-    clearTimeout(beszelSaveTimer);
-    beszelSaveTimer = setTimeout(() => {
-      const url = beszelUrl.value.trim();
-      if (!url) return; // boş URL = silme isteği gerektirmez; env fallback kalır
-      const patch = { beszel: { url, user: beszelUser.value.trim(), password: beszelPassword.value } };
-      S.set({ beszel: { ...((S.get().beszel) || {}), ...patch.beszel } });
-      toast('Beszel credentials saved');
-    }, 900);
-  }
-  ['input', 'change'].forEach(ev =>
-    [beszelUrl, beszelUser, beszelPassword].forEach(el => el.addEventListener(ev, scheduleBeszelSave))
-  );
+  // also subscribe to settings changes from other tabs
+  try { S.subscribe(() => { /* keep DOM in sync only if count changes */ }); } catch {}
 
   /* ============================================================
      Two-factor authentication (TOTP — optional)
@@ -1333,7 +1377,12 @@
       // ids, so we must not touch the freshly inserted rows).
       for (const id of oldSvcIds) await apiJson('DELETE', API_SERVICES + '/' + encodeURIComponent(id));
       for (const id of oldBmIds) await apiJson('DELETE', API_BOOKMARKS + '/' + encodeURIComponent(id));
-      toast('Backup restored');
+      // Clear optimistic bootstrap cache so index reload shows new data immediately
+      try { localStorage.removeItem('server-hub:bootstrap-cache'); localStorage.removeItem('server-hub:bootstrap-cache:ts'); } catch {}
+      try { localStorage.removeItem(window.HubSettings.KEY); } catch {}
+      // Force reload settings from server on next boot
+      toast('Backup restored — reloading');
+      setTimeout(() => location.reload(), 800);
     } catch (err) {
       const msg = err.message;
       if (deleting) {

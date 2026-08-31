@@ -1289,6 +1289,21 @@ class HubHandler(BaseHTTPRequestHandler):
                             continue
                         merged[bk] = bv
                     settings["beszel"] = merged
+                elif k == "beszels" and isinstance(v, list):
+                    # multi-instance: preserve password per id when blank
+                    cur_list = cur_settings.get("beszels") or []
+                    cur_by_id = {str(e.get("id")): e for e in cur_list if isinstance(e, dict) and e.get("id")}
+                    merged_list = []
+                    for entry in v:
+                        if not isinstance(entry, dict):
+                            continue
+                        eid = str(entry.get("id") or "")
+                        cur_entry = cur_by_id.get(eid) if eid else None
+                        e = dict(entry)
+                        if cur_entry and not e.get("password"):
+                            e["password"] = cur_entry.get("password", "")
+                        merged_list.append(e)
+                    settings["beszels"] = merged_list
                 elif isinstance(v, dict) and isinstance(cur_settings.get(k), dict):
                     merged = dict(cur_settings[k])
                     for sk, sv in v.items():
@@ -1465,38 +1480,88 @@ class HubHandler(BaseHTTPRequestHandler):
     # ---- Beszel API helpers ----
 
     def _handle_beszel(self):
-        # Per-user Beszel credentials from settings (jsonb: {"beszel": {...}}).
-        # Falls back to env vars for single-admin legacy mode.
-        cfg = None
+        # Per-user Beszel credentials from settings (jsonb: {"beszel": {...}, "beszels": [...]}) .
+        # Supports multi-instance (beszels array) with backward compat for single legacy beszel.
+        # Always returns {enabled, systems} even when instances present; aggregated systems list.
+        cfgs = []
         supa, user = self._supa()
         if supa is not None and user:
             try:
                 row = supa.get_settings(user["supabase_token"])
-                beszel_cfg = (row or {}).get("settings", {}).get("beszel") or {}
-                if beszel_cfg.get("url"):
-                    cfg = {
-                        "url": str(beszel_cfg["url"]).rstrip("/"),
-                        "user": str(beszel_cfg.get("user", "")),
-                        "password": str(beszel_cfg.get("password", "")),
-                    }
+                settings = (row or {}).get("settings", {}) or {}
+                # new multi-instance
+                beszels = settings.get("beszels")
+                if isinstance(beszels, list) and beszels:
+                    for entry in beszels:
+                        if not isinstance(entry, dict):
+                            continue
+                        url = str(entry.get("url") or "").strip().rstrip("/")
+                        if url:
+                            cfgs.append({
+                                "url": url,
+                                "user": str(entry.get("user", "")),
+                                "password": str(entry.get("password", "")),
+                            })
+                # legacy single fallback if no beszels
+                if not cfgs:
+                    beszel_cfg = settings.get("beszel") or {}
+                    if isinstance(beszel_cfg, dict) and beszel_cfg.get("url"):
+                        cfgs = [{
+                            "url": str(beszel_cfg["url"]).rstrip("/"),
+                            "user": str(beszel_cfg.get("user", "")),
+                            "password": str(beszel_cfg.get("password", "")),
+                        }]
             except Exception:
-                cfg = None  # settings read failure -> fall back to env
-        # SSRF validation
-        _cfg_to_validate = cfg if cfg is not None else read_beszel_env()
-        if _cfg_to_validate and _cfg_to_validate.get("url"):
-            ok, err = _validate_beszel_url(_cfg_to_validate["url"])
-            if not ok:
-                return self._api_error(400, err)
-        try:
-            systems = _beszel_systems(cfg)
-        except Exception:
-            return self.send_bytes(
-                json.dumps({"enabled": True, "error": "beszel unreachable"}), 200,
-                "application/json; charset=utf-8")
-        if systems is None:
+                cfgs = []
+        # Single cfg backward-compat path (env fallback) when no user cfgs
+        if not cfgs:
+            env_cfg = read_beszel_env()
+            if env_cfg and env_cfg.get("url"):
+                _cfg_to_validate = env_cfg
+                ok, err = _validate_beszel_url(_cfg_to_validate["url"])
+                if not ok:
+                    return self._api_error(400, err)
+                try:
+                    systems = _beszel_systems(env_cfg)
+                except Exception:
+                    return self.send_bytes(
+                        json.dumps({"enabled": True, "error": "beszel unreachable"}), 200,
+                        "application/json; charset=utf-8")
+                if systems is None:
+                    return self.send_bytes(json.dumps({"enabled": False}), 200, "application/json; charset=utf-8")
+                return self.send_bytes(
+                    json.dumps({"enabled": True, "systems": systems}), 200,
+                    "application/json; charset=utf-8")
             return self.send_bytes(json.dumps({"enabled": False}), 200, "application/json; charset=utf-8")
+        # Multi-instance: validate each, aggregate systems
+        # filter placeholder example hosts as disabled instances
+        valid_cfgs = []
+        for c in cfgs:
+            ok, err = _validate_beszel_url(c["url"])
+            if not ok:
+                if "example" in err:
+                    continue
+                return self._api_error(400, err)
+            valid_cfgs.append(c)
+        if not valid_cfgs:
+            return self.send_bytes(json.dumps({"enabled": False}), 200, "application/json; charset=utf-8")
+        all_systems = []
+        any_success = False
+        last_error = None
+        for c in valid_cfgs:
+            try:
+                systems = _beszel_systems(c)
+                if systems:
+                    all_systems.extend(systems)
+                any_success = True
+            except Exception as e:
+                last_error = e
+        if any_success:
+            return self.send_bytes(
+                json.dumps({"enabled": True, "systems": all_systems}), 200,
+                "application/json; charset=utf-8")
         return self.send_bytes(
-            json.dumps({"enabled": True, "systems": systems}), 200,
+            json.dumps({"enabled": True, "error": "beszel unreachable"}), 200,
             "application/json; charset=utf-8")
 
     def _handle_beszel_test(self):
