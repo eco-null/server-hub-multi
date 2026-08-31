@@ -787,13 +787,39 @@ def normalize_beszel_system(rec):
     }
 
 
+def _beszel_format_error(e):
+    """Return detailed error string for Beszel failures, truncated to 200 chars."""
+    try:
+        if isinstance(e, urllib.error.HTTPError):
+            # Include HTTP status explicitly
+            base = f"{type(e).__name__} {e.code}: {e.reason}"
+            s = str(e)
+            if s and s not in base and base not in s:
+                detail = f"{base} - {s}"
+            else:
+                detail = base
+        else:
+            detail = f"{type(e).__name__}: {e}"
+        if not detail.strip():
+            detail = type(e).__name__
+    except Exception:
+        try:
+            detail = f"{type(e).__name__}: {e}"
+        except Exception:
+            detail = "error"
+    return detail[:200]
+
+
 def _beszel_urlopen(req):
     try:
         # Kısa timeout: serverless fonksiyon limitleri + hızlı "unreachable"
         # dönüşü, kullanıcı test butonuna bastığında uzun beklemek yerine.
         return urllib.request.urlopen(req, timeout=6)
     except urllib.error.HTTPError as e:
-        e.close()
+        try:
+            e.close()
+        except Exception:
+            pass
         raise
 
 
@@ -1523,9 +1549,10 @@ class HubHandler(BaseHTTPRequestHandler):
                     return self._api_error(400, err)
                 try:
                     systems = _beszel_systems(env_cfg)
-                except Exception:
+                except Exception as e:
+                    detail = _beszel_format_error(e)
                     return self.send_bytes(
-                        json.dumps({"enabled": True, "error": "beszel unreachable"}), 200,
+                        json.dumps({"enabled": True, "error": detail}), 200,
                         "application/json; charset=utf-8")
                 if systems is None:
                     return self.send_bytes(json.dumps({"enabled": False}), 200, "application/json; charset=utf-8")
@@ -1548,20 +1575,26 @@ class HubHandler(BaseHTTPRequestHandler):
         all_systems = []
         any_success = False
         last_error = None
+        instances = []
         for c in valid_cfgs:
             try:
                 systems = _beszel_systems(c)
-                if systems:
-                    all_systems.extend(systems)
+                if systems is None:
+                    systems = []
+                all_systems.extend(systems)
                 any_success = True
+                instances.append({"url": c["url"], "systems": systems})
             except Exception as e:
                 last_error = e
+                detail = _beszel_format_error(e)
+                instances.append({"url": c["url"], "error": detail, "systems": []})
         if any_success:
             return self.send_bytes(
-                json.dumps({"enabled": True, "systems": all_systems}), 200,
+                json.dumps({"enabled": True, "systems": all_systems, "instances": instances}), 200,
                 "application/json; charset=utf-8")
+        detail = _beszel_format_error(last_error) if last_error else "beszel unreachable"
         return self.send_bytes(
-            json.dumps({"enabled": True, "error": "beszel unreachable"}), 200,
+            json.dumps({"enabled": True, "error": detail, "systems": [], "instances": instances}), 200,
             "application/json; charset=utf-8")
 
     def _handle_beszel_test(self):
@@ -1587,9 +1620,10 @@ class HubHandler(BaseHTTPRequestHandler):
             return self._api_error(400, err_msg)
         try:
             systems = _beszel_systems(cfg)
-        except Exception:
+        except Exception as e:
+            detail = _beszel_format_error(e)
             return self.send_bytes(
-                json.dumps({"enabled": True, "error": "beszel unreachable"}), 200,
+                json.dumps({"enabled": True, "error": detail}), 200,
                 "application/json; charset=utf-8")
         if systems is None:
             return self.send_bytes(json.dumps({"enabled": False}), 200, "application/json; charset=utf-8")

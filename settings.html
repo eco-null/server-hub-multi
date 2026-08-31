@@ -714,6 +714,9 @@
     if (tone === 'ok') el.classList.add('text-[color:var(--green)]');
     if (tone === 'bad') el.classList.add('text-[color:var(--red)]');
     el.textContent = text;
+    // detailed server error (up to 200 chars) shown directly; keep title for full hover
+    try { el.title = text; } catch {}
+    el.style.wordBreak = 'break-word';
   }
 
   function collectFromDOM() {
