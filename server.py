@@ -350,6 +350,10 @@ class Sessions:
             raise RuntimeError("SESSION_SECRET must be set on Vercel (fleet needs stable HMAC key) — see MED-06")
         self._secret = env_secret or secrets.token_hex(32)
         self._secret_b = self._secret.encode("utf-8")
+        self._pending_used = {}  # jti -> exp
+        self._pending_used_lock = threading.Lock()
+        self._totp_attempts = {}  # user_id -> [timestamps]
+        self._totp_lock = threading.Lock()
 
     def _hmac(self, b64):
         return hmac.new(self._secret_b, b64.encode("utf-8"), hashlib.sha256).hexdigest()
@@ -392,6 +396,9 @@ class Sessions:
     # ---- stateless signed-cookie API (serverless-safe) ----
     def sign(self, user):
         """Return a signed cookie value for the user payload."""
+        typ = user.get("typ")
+        is_pending = typ == "pending"
+        exp = int(time.time()) + (300 if is_pending else SESSION_TTL)
         payload = {
             "user_id": user.get("user_id", ""),
             "email": user.get("email", ""),
@@ -399,16 +406,44 @@ class Sessions:
             "supabase_token": user.get("supabase_token", ""),
             "refresh_token": user.get("refresh_token", ""),
             "token_exp": int(user.get("token_exp", 0) or 0),
-            "exp": int(time.time()) + SESSION_TTL,
+            "exp": exp,
         }
         # typ discriminator for 2FA pending vs session (CRIT-2FA)
-        typ = user.get("typ")
         if typ:
             payload["typ"] = typ
+        if is_pending:
+            payload["jti"] = secrets.token_hex(8)
         raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
         b64 = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
         sig = self._hmac(b64)
         return b64 + "." + sig
+
+    def _prune_pending_used(self):
+        now = time.time()
+        with self._pending_used_lock:
+            expired = [k for k, exp in self._pending_used.items() if exp < now]
+            for k in expired:
+                self._pending_used.pop(k, None)
+
+    def totp_is_rate_limited(self, user_id):
+        now = time.time()
+        with self._totp_lock:
+            lst = self._totp_attempts.get(user_id, [])
+            lst = [t for t in lst if now - t < 300]
+            self._totp_attempts[user_id] = lst
+            return len(lst) >= 5
+
+    def totp_record_failure(self, user_id):
+        now = time.time()
+        with self._totp_lock:
+            lst = self._totp_attempts.get(user_id, [])
+            lst = [t for t in lst if now - t < 300]
+            lst.append(now)
+            self._totp_attempts[user_id] = lst
+
+    def totp_reset(self, user_id):
+        with self._totp_lock:
+            self._totp_attempts.pop(user_id, None)
 
     def verify_signed(self, token):
         """Verify a signed cookie value -> user dict or None. Rejects pending tokens."""
@@ -437,7 +472,7 @@ class Sessions:
         }
 
     def verify_pending(self, token):
-        """Verify a pending-2FA token (typ==pending) -> user dict or None."""
+        """Verify a pending-2FA token (typ==pending) -> user dict or None. Checks jti replay."""
         if not token or "." not in token:
             return None
         b64, sig = token.rsplit(".", 1)
@@ -452,6 +487,12 @@ class Sessions:
             return None
         if payload.get("typ") != "pending":
             return None
+        jti = payload.get("jti")
+        if jti:
+            self._prune_pending_used()
+            with self._pending_used_lock:
+                if jti in self._pending_used:
+                    return None
         return {
             "user_id": payload.get("user_id", ""),
             "email": payload.get("email", ""),
@@ -459,7 +500,16 @@ class Sessions:
             "supabase_token": payload.get("supabase_token", ""),
             "refresh_token": payload.get("refresh_token", ""),
             "token_exp": int(payload.get("token_exp", 0) or 0),
+            "_jti": jti,
+            "_exp": int(payload.get("exp", 0)),
         }
+
+    def burn_pending_jti(self, jti, exp):
+        if not jti:
+            return
+        self._prune_pending_used()
+        with self._pending_used_lock:
+            self._pending_used[jti] = int(exp)
 
 
 class LoginGuard:
@@ -877,6 +927,12 @@ def _beszel_format_error(e):
         # Cloudflare challenge detection
         if "Just a moment" in detail or "cf-challenge" in detail or "Attention Required" in detail or "DDoS protection" in detail:
             return "Beszel blocked by Cloudflare (Just a moment). Disable 'I'm Under Attack' for bs.canozdal.com or add WAF rule to allow Vercel IPs, or use direct origin URL (e.g., tunnel URL)."
+        # Scrub internal URLs/IPs from detail to avoid leaking
+        try:
+            detail = re.sub(r"https?://[^\s\"'<>]+", "[url]", detail)
+            detail = re.sub(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?\b", "[ip]", detail)
+        except Exception:
+            pass
     except Exception:
         try:
             detail = f"{type(e).__name__}: {e}"
@@ -884,6 +940,11 @@ def _beszel_format_error(e):
             detail = "error"
         if "Just a moment" in detail or "cf-challenge" in detail or "Attention Required" in detail or "DDoS protection" in detail:
             return "Beszel blocked by Cloudflare (Just a moment). Disable 'I'm Under Attack' for bs.canozdal.com or add WAF rule to allow Vercel IPs, or use direct origin URL (e.g., tunnel URL)."
+        try:
+            detail = re.sub(r"https?://[^\s\"'<>]+", "[url]", detail)
+            detail = re.sub(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?\b", "[ip]", detail)
+        except Exception:
+            pass
     return detail[:200]
 
 
@@ -997,12 +1058,30 @@ def _beszel_systems(cfg=None):
         cfg = read_beszel_env()
     if not cfg or not cfg.get("url"):
         return None
-    # Treat placeholder/example URL as not configured (prevents 500 on settings test)
-    try:
-        host = urllib.parse.urlparse(cfg["url"]).netloc.lower().split(":")[0]
-        if host == "example.com" or host.endswith(".example.com") or host == "beszel.example.com" or host.endswith(".beszel.example.com"):
+    # Validate URL for SSRF and handle placeholder example hosts
+    ok, _err = _validate_beszel_url(cfg["url"])
+    if not ok:
+        if _err and "example" in _err:
             return None
-    except:
+        raise RuntimeError(_err)
+    # DNS rebinding: resolve host and block if any IP is private/internal
+    try:
+        _host = urllib.parse.urlparse(cfg["url"]).hostname
+        if _host:
+            try:
+                infos = socket.getaddrinfo(_host, None)
+            except socket.gaierror:
+                infos = []
+            for _info in infos:
+                try:
+                    _ip = _info[4][0]
+                except Exception:
+                    continue
+                if _is_private_host(_ip):
+                    raise RuntimeError("private host blocked")
+    except RuntimeError:
+        raise
+    except Exception:
         pass
     now = time.time()
     cache_key = json.dumps(cfg, sort_keys=True)
@@ -1048,13 +1127,32 @@ class HubHandler(BaseHTTPRequestHandler):
         print("[%s] %s" % (self.client_address[0], fmt % args))
 
     def client_ip(self):
-        # IP spoof fix: only trust proxy headers on Vercel
+        # IP spoof fix: only trust proxy headers on Vercel, use last entry (closest proxy) not first (spoofable)
         if os.environ.get("VERCEL") == "1":
+            # Prefer Vercel's specific header if present
+            xvf = self.headers.get("X-Vercel-Forwarded-For", "")
+            if xvf:
+                # take last entry
+                parts = [p.strip() for p in xvf.split(",") if p.strip()]
+                if parts:
+                    cand = parts[-1]
+                    try:
+                        ipaddress.ip_address(cand)
+                        return cand
+                    except ValueError:
+                        return cand
             xff = self.headers.get("X-Forwarded-For", "")
             if xff:
-                first = xff.split(",")[0].strip()
-                if first:
-                    return first
+                parts = [p.strip() for p in xff.split(",") if p.strip()]
+                if parts:
+                    cand = parts[-1]
+                    # validate is ip else fallback
+                    try:
+                        ipaddress.ip_address(cand)
+                        return cand
+                    except ValueError:
+                        # if not ip, still return last trimmed
+                        return cand
             xri = self.headers.get("X-Real-IP", "")
             if xri:
                 return xri.strip()
@@ -1094,13 +1192,18 @@ class HubHandler(BaseHTTPRequestHandler):
 
     def read_cookie(self, name):
         raw = self.headers.get("Cookie") or ""
-        for part in raw.split(";"):
-            part = part.strip()
-            if not part or "=" not in part:
-                continue
-            k, v = part.split("=", 1)
-            if k.strip() == name:
-                return v.strip()
+        # handle __Host fallback for hub_session
+        candidates = [name]
+        if name == "hub_session":
+            candidates = ["__Host-hub_session", "hub_session"]
+        for cand in candidates:
+            for part in raw.split(";"):
+                part = part.strip()
+                if not part or "=" not in part:
+                    continue
+                k, v = part.split("=", 1)
+                if k.strip() == cand:
+                    return v.strip()
         return None
 
     def read_json_body(self):
@@ -1118,8 +1221,17 @@ class HubHandler(BaseHTTPRequestHandler):
         except ValueError:
             return None, "invalid JSON"
 
+    def _session_cookie_name(self):
+        # __Host- prefix requires Secure, Path=/, no Domain; use when Secure (VERCEL==1)
+        if os.environ.get("VERCEL") == "1" and os.environ.get("HUB_INSECURE_HTTP") != "1":
+            return "__Host-hub_session"
+        return "hub_session"
+
     def session_user(self):
-        _raw = self.read_cookie("hub_session")
+        # try __Host- first then fallback
+        _raw = self.read_cookie("__Host-hub_session")
+        if not _raw:
+            _raw = self.read_cookie("hub_session")
         if not _raw:
             return None
         # Single HMAC verify: verify_signed already rejects pending tokens (typ==pending)
@@ -1145,11 +1257,13 @@ class HubHandler(BaseHTTPRequestHandler):
     def session_cookie(self, token):
         # Secure cookie: always Secure/HttpOnly/SameSite/Path unless HUB_INSECURE_HTTP==1 for local HTTP dev
         secure = "" if os.environ.get("HUB_INSECURE_HTTP") == "1" else "; Secure"
-        return "hub_session=%s; HttpOnly; SameSite=Lax; Path=/; Max-Age=%d%s" % (token, SESSION_TTL, secure)
+        name = self._session_cookie_name()
+        return "%s=%s; HttpOnly; SameSite=Lax; Path=/; Max-Age=%d%s" % (name, token, SESSION_TTL, secure)
 
     def clear_cookie(self):
         secure = "" if os.environ.get("HUB_INSECURE_HTTP") == "1" else "; Secure"
-        return {"Set-Cookie": "hub_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax%s" % secure}
+        name = self._session_cookie_name()
+        return {"Set-Cookie": "%s=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax%s" % (name, secure)}
 
     # ---- services API helpers ----
 
@@ -1290,6 +1404,17 @@ class HubHandler(BaseHTTPRequestHandler):
                 b = dict(b)
                 b["password"] = ""
                 settings_val["beszel"] = b
+            beszels = settings_val.get("beszels")
+            if isinstance(beszels, list):
+                nb = []
+                for _b in beszels:
+                    if isinstance(_b, dict) and "password" in _b:
+                        _bb = dict(_b)
+                        _bb["password"] = ""
+                        nb.append(_bb)
+                    else:
+                        nb.append(_b if not isinstance(_b, dict) else dict(_b))
+                settings_val["beszels"] = nb
             t = settings_val.get("twofa")
             if isinstance(t, dict):
                 t = dict(t)
@@ -1332,6 +1457,18 @@ class HubHandler(BaseHTTPRequestHandler):
                     b = dict(b)
                     b["password"] = ""
                     row["settings"]["beszel"] = b
+                # multi-beszel: blank each password
+                beszels = row["settings"].get("beszels")
+                if isinstance(beszels, list):
+                    nb = []
+                    for _b in beszels:
+                        if isinstance(_b, dict) and "password" in _b:
+                            _bb = dict(_b)
+                            _bb["password"] = ""
+                            nb.append(_bb)
+                        else:
+                            nb.append(_b if not isinstance(_b, dict) else dict(_b))
+                    row["settings"]["beszels"] = nb
                 t = row["settings"].get("twofa")
                 if isinstance(t, dict):
                     t = dict(t)
@@ -1439,6 +1576,8 @@ class HubHandler(BaseHTTPRequestHandler):
         if isinstance(incoming_settings, dict):
             settings = dict(cur_settings)
             for k, v in incoming_settings.items():
+                if k in ("__proto__", "constructor", "prototype"):
+                    continue
                 # MED-03: null must not wipe dict with None
                 if v is None:
                     continue
@@ -1471,6 +1610,9 @@ class HubHandler(BaseHTTPRequestHandler):
                         if not str(e.get("name") or "").strip() and e.get("url") and e.get("user") and e.get("password"):
                             try:
                                 _cfg = {"url": str(e.get("url") or "").strip().rstrip("/"), "user": str(e.get("user") or ""), "password": str(e.get("password") or "")}
+                                ok, _ = _validate_beszel_url(_cfg["url"])
+                                if not ok:
+                                    raise RuntimeError("invalid beszel url")
                                 systems = _beszel_systems(_cfg)
                                 if systems and isinstance(systems, list) and len(systems) > 0:
                                     auto = systems[0].get("name") if isinstance(systems[0], dict) else None
@@ -1805,9 +1947,12 @@ class HubHandler(BaseHTTPRequestHandler):
                 break
             decoded = nxt
         rel = decoded
-        # Resolve symlinks and enforce WEB_ROOT containment (reuse WEB_ROOT_REAL)
+        if '\x00' in rel:
+            return self.send_bytes("Forbidden", 403)
+        rel = re.sub(r'/+', '/', rel.replace('\\','/'))
+        # Resolve symlinks and enforce WEB_ROOT containment (reuse WEB_ROOT_REAL) — case-insensitive on Windows
         full = os.path.realpath(os.path.join(WEB_ROOT_REAL, rel))
-        if full != WEB_ROOT_REAL and not full.startswith(WEB_ROOT_REAL + os.sep):
+        if os.path.normcase(full) != os.path.normcase(WEB_ROOT_REAL) and not os.path.normcase(full).startswith(os.path.normcase(WEB_ROOT_REAL)+os.path.normcase(os.sep)):
             return self.send_bytes("Forbidden", 403)
         if not os.path.isfile(full):
             return self.send_bytes("Not found", 404)
@@ -1851,6 +1996,8 @@ class HubHandler(BaseHTTPRequestHandler):
             headers["Cache-Control"] = "no-cache"
         else:
             headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        if ext == ".svg":
+            headers["Content-Disposition"] = "inline"
         return self.send_bytes(body, 200, ctype, headers)
 
     # ---- routes ----
@@ -1879,14 +2026,18 @@ class HubHandler(BaseHTTPRequestHandler):
                     self.server.supabase.sign_out(user["supabase_token"])
                 except Exception:
                     pass
-            self.server.sessions.delete(self.read_cookie("hub_session"))
+            # clear both cookie names for backward compat
+            _raw = self.read_cookie("__Host-hub_session") or self.read_cookie("hub_session")
+            self.server.sessions.delete(_raw)
             # clear both hub_session and 2fa_pending with secure flags
             secure = "" if os.environ.get("HUB_INSECURE_HTTP") == "1" else "; Secure"
             self.send_response(302)
             self.send_header("Location", "/login")
             self.send_header("Content-Length", "0")
+            # clear session cookies (both names)
             self.send_header("Set-Cookie", "hub_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax%s" % secure)
-            self.send_header("Set-Cookie", "2fa_pending=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax%s" % secure)
+            self.send_header("Set-Cookie", "__Host-hub_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax%s" % secure)
+            self.send_header("Set-Cookie", "2fa_pending=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict%s" % secure)
             pending = getattr(self, "_pending_cookie", None)
             if pending:
                 self.send_header("Set-Cookie", pending)
@@ -2051,7 +2202,7 @@ class HubHandler(BaseHTTPRequestHandler):
                 if not _USERNAME_RE.match(username):
                     guard.record_failure(ip)
                     return self.redirect("/login?show=signup&error=invalid_username")
-                if len(password) < 8:
+                if len(password) < 8 or not re.search(r"[A-Za-z]", password) or not re.search(r"[0-9]", password):
                     guard.record_failure(ip)
                     return self.redirect("/login?show=signup&error=weak_password")
                 # Check username not already taken (use SECURITY DEFINER RPC to bypass RLS)
@@ -2152,14 +2303,31 @@ class HubHandler(BaseHTTPRequestHandler):
                         secret = t.get("secret")
                 except Exception:
                     secret = None
+                uid = pend_user.get("user_id") or pend_user.get("email") or ip
+                if self.server.sessions.totp_is_rate_limited(uid):
+                    guard.record_failure(ip)
+                    return self.redirect("/login?2fa=1&error=totp")
                 if secret and totp_verify(secret, totp_code_val):
+                    # per-user TOTP rate limit cleared on success
+                    try:
+                        self.server.sessions.totp_reset(uid)
+                    except Exception:
+                        pass
+                    try:
+                        self.server.sessions.burn_pending_jti(pend_user.get("_jti"), pend_user.get("_exp"))
+                    except Exception:
+                        pass
                     guard.reset(ip)
                     token = self.server.sessions.sign(pend_user)
                     # hub_session kur (Set-Cookie), 2fa_pending'i ayrı header ile sil
                     _sec = "" if os.environ.get("HUB_INSECURE_HTTP") == "1" else "; Secure"
-                    self._pending_cookie = "2fa_pending=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax%s" % _sec
+                    self._pending_cookie = "2fa_pending=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict%s" % _sec
                     return self.redirect("/", {"Set-Cookie": self.session_cookie(token)})
                 # Wrong or expired — keep pending but show error.
+                try:
+                    self.server.sessions.totp_record_failure(uid)
+                except Exception:
+                    pass
                 guard.record_failure(ip)
                 return self.redirect("/login?2fa=1&error=totp")
 
@@ -2210,9 +2378,9 @@ class HubHandler(BaseHTTPRequestHandler):
         return self.redirect("/login?error=1")
 
     def _pending_cookie_value(self, token):
-        """Short-lived cookie for the pending-2FA login step (5 min)."""
+        """Short-lived cookie for the pending-2FA login step (5 min). Strict required."""
         secure = "" if os.environ.get("HUB_INSECURE_HTTP") == "1" else "; Secure"
-        return "2fa_pending=%s; HttpOnly; SameSite=Lax; Path=/; Max-Age=300%s" % (token, secure)
+        return "2fa_pending=%s; HttpOnly; SameSite=Strict; Path=/; Max-Age=300%s" % (token, secure)
 
     def _supabase_user_from_session(self, session):
         """Build the user dict stored in the local session from a Supabase session."""

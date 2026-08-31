@@ -212,6 +212,7 @@
 
   const iframe = document.createElement('iframe');
   iframe.src = 'index.html';
+  iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin');
   iframe.style.cssText = 'position:fixed; bottom:0; right:0; width:480px; height:600px; opacity:0.6; border:1px solid #444; z-index:50;';
   iframe.id = 'hub';
   document.body.appendChild(iframe);
@@ -220,6 +221,7 @@
 
   const sframe = document.createElement('iframe');
   sframe.src = 'settings.html';
+  sframe.setAttribute('sandbox', 'allow-scripts allow-same-origin');
   sframe.style.cssText = 'position:fixed; bottom:0; left:0; width:480px; height:600px; opacity:0.6; border:1px solid #444; z-index:49;';
   sframe.id = 'hub-settings';
   document.body.appendChild(sframe);

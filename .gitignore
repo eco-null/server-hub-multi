@@ -38,6 +38,7 @@ services.json
 
 # Supabase CLI
 supabase/
+supabase/.temp/
 
 # README backups
 README.md.bak-*

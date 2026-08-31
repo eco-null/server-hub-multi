@@ -467,6 +467,12 @@ function clear() {
   try { safeStorage.removeItem(SETTINGS_KEY); } catch {}
   try { safeStorage.removeItem('server-hub:services'); } catch {}
   try { safeStorage.removeItem('server-hub:theme'); } catch {}
+  try { safeStorage.removeItem('server-hub:me'); } catch {}
+  try { safeStorage.removeItem('server-hub:bootstrap-cache'); } catch {}
+  try { safeStorage.removeItem('server-hub:bootstrap-cache:ts'); } catch {}
+  try { localStorage.removeItem('server-hub:me'); } catch {}
+  try { localStorage.removeItem('server-hub:bootstrap-cache'); } catch {}
+  try { localStorage.removeItem('server-hub:bootstrap-cache:ts'); } catch {}
   _invalidateReadCache();
   const next = structuredCloneSafe(DEFAULTS);
   _readCacheRawStr = '{}';

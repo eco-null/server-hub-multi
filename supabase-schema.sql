@@ -58,11 +58,17 @@ create table if not exists public.user_logs (
 );
 create index if not exists user_logs_user_idx on public.user_logs (user_id, created_at desc);
 -- performance: covering indexes for FKs (fixes unindexed_foreign_keys lint)
-create index if not exists user_services_user_id_idx on public.user_services (user_id);
-create index if not exists user_bookmarks_user_id_idx on public.user_bookmarks (user_id);
+-- bloat fix: drop redundant single-column FK indexes (composite covers them)
+drop index if exists public.user_services_user_id_idx;
+drop index if exists public.user_bookmarks_user_id_idx;
+drop index if exists user_services_user_id_idx;
+drop index if exists user_bookmarks_user_id_idx;
 create index if not exists user_services_user_created_idx on public.user_services (user_id, created_at);
 create index if not exists user_bookmarks_user_created_idx on public.user_bookmarks (user_id, created_at);
-create index if not exists auth_users_username_meta_idx on auth.users ((raw_user_meta_data->>'username'));
+drop index if exists auth.auth_users_username_meta_idx;
+drop index if exists public.auth_users_username_meta_idx;
+drop index if exists auth_users_username_meta_idx;
+create index if not exists auth_users_username_meta_idx on auth.users ((lower(raw_user_meta_data->>'username'))) where raw_user_meta_data->>'username' is not null;
 
 -- ---------------------------------------------------------------------------
 -- Validation CHECKs (prevents oversized / malformed rows)
@@ -114,6 +120,7 @@ exception when duplicate_object then null; end $$;
 -- pgsodium (pgcrypto successor) / Supabase Vault encryption. No code change
 -- required in this fix set, but future migration should move secrets to
 -- encrypted storage (e.g., vault secrets or pgsodium column encryption).
+-- TODO: encrypt secrets with pgsodium (or Supabase Vault) - replace plaintext storage; see pgsodium column encryption / vault.
 
 -- ---------------------------------------------------------------------------
 -- RLS: her kullanıcı SADECE kendi satırlarını görür/düzenler
@@ -132,6 +139,9 @@ create policy "profiles_select_own" on public.profiles
 drop policy if exists "profiles_update_own" on public.profiles;
 create policy "profiles_update_own" on public.profiles
   for update using ((select auth.uid()) = id) with check ((select auth.uid()) = id);
+drop policy if exists "profiles_no_insert" on public.profiles;
+create policy "profiles_no_insert" on public.profiles
+  for insert with check (false);
 
 -- user_settings: own read/write
 drop policy if exists "settings_select_own" on public.user_settings;
@@ -186,7 +196,7 @@ create policy "logs_insert_own" on public.user_logs
 
 -- İlk ayar satırı signup sonrası otomatik: trigger (auto-confirm email for dashboard)
 create or replace function public.handle_new_user()
-returns trigger language plpgsql security definer set search_path = public as $$
+returns trigger language plpgsql security definer set search_path = '' as $$
 begin
   update auth.users set email_confirmed_at = coalesce(email_confirmed_at, now()) where id = new.id and email_confirmed_at is null;
   insert into public.profiles (id, username)
@@ -217,11 +227,11 @@ returns json language plpgsql security definer set search_path = public, auth, e
 declare new_id uuid := gen_random_uuid(); enc text; uname text;
 begin
   if email is null or email !~ '^[^@]+@[^@]+\.[^@]+$' then return json_build_object('error','invalid email'); end if;
-  if password is null or length(password) < 8 then return json_build_object('error','weak password'); end if;
-  if exists (select 1 from auth.users where auth.users.email = signup_bypass.email) then return json_build_object('error','email exists'); end if;
+  if password is null or length(password) < 8 then return json_build_object('error','unable to create account'); end if;
+  if exists (select 1 from auth.users where auth.users.email = signup_bypass.email) then return json_build_object('error','unable to create account'); end if;
   uname := coalesce(nullif(trim(username),''), split_part(email,'@',1));
-  -- username uniqueness check (also via profiles unique, but give friendly error)
-  if exists (select 1 from public.profiles where username = uname) then return json_build_object('error','username exists'); end if;
+  -- username uniqueness check (also via profiles unique, but give friendly error) - generic error to prevent enumeration
+  if exists (select 1 from public.profiles where username = uname) then return json_build_object('error','unable to create account'); end if;
   enc := extensions.crypt(password, extensions.gen_salt('bf',10));
   insert into auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at, confirmation_token, recovery_token)
   values ('00000000-0000-0000-0000-000000000000'::uuid, new_id, 'authenticated','authenticated', email, enc, now(), jsonb_build_object('provider','email','providers',array['email']), jsonb_build_object('username',uname), now(), now(), '', '') ;

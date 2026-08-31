@@ -905,9 +905,14 @@
       a.href = /^https?:\/\//i.test(b.url) ? b.url : '#';
       if (!/^https?:\/\//i.test(b.url)) a.classList.add('cursor-default', 'opacity-70');
       const color = /^#[0-9a-fA-F]{6}$/.test(b.color || '') ? b.color : 'var(--accent)';
-      a.innerHTML = '<span class="w-2 h-2 rounded-full shrink-0" style="background:' + color + '"></span>'
-        + '<span class="truncate min-w-0">' + esc(b.name) + '</span>';
-      box.appendChild(a);
+      const dot = document.createElement('span');
+      dot.className = 'w-2 h-2 rounded-full shrink-0';
+      dot.style.backgroundColor = color;
+      const label = document.createElement('span');
+      label.className = 'truncate min-w-0';
+      label.innerHTML = esc(b.name);
+      a.appendChild(dot);
+      a.appendChild(label);
     });
   }
 
@@ -1817,6 +1822,8 @@
           if (last && last !== d.email) {
             if (window.HubSettings && window.HubSettings.clear) window.HubSettings.clear();
             try { localStorage.removeItem('server-hub:services'); } catch {}
+            try { localStorage.removeItem('server-hub:bootstrap-cache'); } catch {}
+            try { localStorage.removeItem('server-hub:bootstrap-cache:ts'); } catch {}
             // Force reload of per-user data for new account
             try { SERVICES = await fetchServices(); _servicesVersion++; renderGroups(); } catch {}
             try { await loadBookmarks(); } catch {}
@@ -1862,8 +1869,9 @@
      ============================================================ */
   const _BOOTSTRAP_CACHE_KEY = 'server-hub:bootstrap-cache';
   const _BOOTSTRAP_TTL = 5*60*1000;
-  function _getCachedBootstrap(){ try{ const raw=localStorage.getItem(_BOOTSTRAP_CACHE_KEY); if(!raw) return null; const p=JSON.parse(raw); if(!p||typeof p.t!=='number'||!p.data) return null; if(Date.now()-p.t>_BOOTSTRAP_TTL){ try{localStorage.removeItem(_BOOTSTRAP_CACHE_KEY);}catch{} return null;} return p.data; }catch{ return null; } }
-  function _setCachedBootstrap(data){ try{ localStorage.setItem(_BOOTSTRAP_CACHE_KEY, JSON.stringify({t:Date.now(), data})); }catch{} }
+  function _getCurrentBootstrapUserId(){ try{ const me=localStorage.getItem('server-hub:me'); if(me) return me; }catch{} try{ const s=window.HubSettings&&window.HubSettings.get&&window.HubSettings.get(); if(s&&s.userName) return s.userName; }catch{} return null; }
+  function _getCachedBootstrap(){ try{ const raw=localStorage.getItem(_BOOTSTRAP_CACHE_KEY); if(!raw) return null; const p=JSON.parse(raw); if(!p||typeof p.t!=='number'||!p.data) return null; if(Date.now()-p.t>_BOOTSTRAP_TTL){ try{localStorage.removeItem(_BOOTSTRAP_CACHE_KEY);}catch{} try{localStorage.removeItem('server-hub:bootstrap-cache:ts');}catch{} return null;} const cur=_getCurrentBootstrapUserId(); if(p.user_id!==cur){ try{localStorage.removeItem(_BOOTSTRAP_CACHE_KEY);}catch{} try{localStorage.removeItem('server-hub:bootstrap-cache:ts');}catch{} return null; } return p.data; }catch{ return null; } }
+  function _setCachedBootstrap(data){ try{ const uid=_getCurrentBootstrapUserId(); localStorage.setItem(_BOOTSTRAP_CACHE_KEY, JSON.stringify({t:Date.now(), user_id: uid, data})); try{localStorage.setItem('server-hub:bootstrap-cache:ts', String(Date.now()));}catch{} }catch{} }
   const _bootstrapPromise = (function(){ try{ return fetch('/api/bootstrap', {credentials:'include', headers:{'Accept':'application/json'}, cache:'no-store'}).then(r=>r.ok?r.json():null).catch(()=>null); }catch{ return Promise.resolve(null); } })();
   try{ window._hubBootstrapPromise = _bootstrapPromise; }catch{}
 

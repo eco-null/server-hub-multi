@@ -111,8 +111,30 @@ def _build_handler(environ, body):
     else:
         headers["Content-Length"] = "0"
 
+    # XFF spoof fix: same logic as HubHandler.client_ip
+    _remote = environ.get("REMOTE_ADDR", "127.0.0.1")
+    _client_ip = _remote
+    if os.environ.get("VERCEL") == "1":
+        # Prefer X-Vercel-Forwarded-For
+        _xvf = headers.get("X-Vercel-Forwarded-For", "") or environ.get("HTTP_X_VERCEL_FORWARDED_FOR", "")
+        if _xvf:
+            _parts = [p.strip() for p in _xvf.split(",") if p.strip()]
+            if _parts:
+                _client_ip = _parts[-1]
+        else:
+            _xff = headers.get("X-Forwarded-For", "") or environ.get("HTTP_X_FORWARDED_FOR", "")
+            if _xff:
+                _parts = [p.strip() for p in _xff.split(",") if p.strip()]
+                if _parts:
+                    _client_ip = _parts[-1]
+            else:
+                _xri = headers.get("X-Real-Ip", "") or headers.get("X-Real-IP", "") or environ.get("HTTP_X_REAL_IP", "")
+                if _xri:
+                    _client_ip = _xri.strip()
+    else:
+        _client_ip = _remote
     handler = _WrappedHandler.__new__(_WrappedHandler)
-    handler.client_address = (environ.get("REMOTE_ADDR", "127.0.0.1"), 0)
+    handler.client_address = (_client_ip, 0)
     handler.command = method
     handler.path = path_qs
     handler.request_version = "HTTP/1.1"
