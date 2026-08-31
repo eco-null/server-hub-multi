@@ -634,6 +634,14 @@ BESZEL_CACHE_TTL = 10.0
 _beszel_cache = {}
 _beszel_cache_lock = threading.Lock()
 
+BESZEL_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+  }
+
 
 def clear_beszel_cache():
     with _beszel_cache_lock:
@@ -866,11 +874,16 @@ def _beszel_format_error(e):
             detail = f"{type(e).__name__}: {e}"
         if not detail.strip():
             detail = type(e).__name__
+        # Cloudflare challenge detection
+        if "Just a moment" in detail or "cf-challenge" in detail or "Attention Required" in detail or "DDoS protection" in detail:
+            return "Beszel blocked by Cloudflare (Just a moment). Disable 'I'm Under Attack' for bs.canozdal.com or add WAF rule to allow Vercel IPs, or use direct origin URL (e.g., tunnel URL)."
     except Exception:
         try:
             detail = f"{type(e).__name__}: {e}"
         except Exception:
             detail = "error"
+        if "Just a moment" in detail or "cf-challenge" in detail or "Attention Required" in detail or "DDoS protection" in detail:
+            return "Beszel blocked by Cloudflare (Just a moment). Disable 'I'm Under Attack' for bs.canozdal.com or add WAF rule to allow Vercel IPs, or use direct origin URL (e.g., tunnel URL)."
     return detail[:200]
 
 
@@ -927,7 +940,7 @@ def _beszel_login(cfg):
         req = urllib.request.Request(
             url,
             data=payload,
-            headers={"Content-Type": "application/json"},
+            headers={**BESZEL_HEADERS, "Content-Type": "application/json"},
         )
         try:
             with _beszel_urlopen(req) as resp:
@@ -1011,10 +1024,7 @@ def _beszel_systems(cfg=None):
 
         req = urllib.request.Request(
             cfg["url"].rstrip("/") + "/api/collections/systems/records?perPage=100",
-            headers={
-                # PocketBase accepts both "Bearer <token>" and bare "<token>".
-                "Authorization": f"Bearer {token}",
-            },
+            headers={**BESZEL_HEADERS, "Authorization": f"Bearer {token}"},
         )
         with _beszel_urlopen(req) as resp:
             data = json.loads(resp.read().decode("utf-8", "replace"))
