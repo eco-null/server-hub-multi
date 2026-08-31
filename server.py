@@ -791,13 +791,77 @@ def _beszel_format_error(e):
     """Return detailed error string for Beszel failures, truncated to 200 chars."""
     try:
         if isinstance(e, urllib.error.HTTPError):
-            # Include HTTP status explicitly
             base = f"{type(e).__name__} {e.code}: {e.reason}"
             s = str(e)
             if s and s not in base and base not in s:
                 detail = f"{base} - {s}"
             else:
                 detail = base
+            # Enhance with PocketBase JSON body message if available
+            body = None
+            # Prefer previously captured body (set by _beszel_login / _beszel_urlopen)
+            b = getattr(e, "_body", None)
+            if isinstance(b, str) and b:
+                body = b
+            else:
+                # Try to read from the HTTPError object (may be consumed already)
+                try:
+                    # e.read() may have been consumed; try fp directly as fallback
+                    try:
+                        raw = e.read()
+                    except Exception:
+                        raw = None
+                        try:
+                            if getattr(e, "fp", None) is not None:
+                                raw = e.fp.read()
+                        except Exception:
+                            raw = None
+                    if raw:
+                        if isinstance(raw, bytes):
+                            body = raw.decode("utf-8", "replace")
+                        else:
+                            body = str(raw)
+                except Exception:
+                    body = None
+                # Ensure file pointer is closed after attempt
+                try:
+                    e.close()
+                except Exception:
+                    pass
+            if body:
+                body = body[:500]
+                msg = None
+                try:
+                    j = json.loads(body)
+                    if isinstance(j, dict):
+                        msg = j.get("message")
+                        if not msg:
+                            data = j.get("data")
+                            if isinstance(data, dict):
+                                # PocketBase validation shape: data[field].message
+                                for v in data.values():
+                                    if isinstance(v, dict) and v.get("message"):
+                                        msg = v["message"]
+                                        break
+                                    if isinstance(v, str) and v:
+                                        msg = v
+                                        break
+                            if not msg and isinstance(data, str):
+                                msg = data
+                        if not msg:
+                            # fallback to any string value
+                            for k in ("error", "reason", "detail"):
+                                if isinstance(j.get(k), str) and j.get(k):
+                                    msg = j.get(k)
+                                    break
+                except Exception:
+                    msg = None
+                extra = (msg or body[:120]).strip()
+                if extra:
+                    # avoid duplicating if already in detail
+                    if extra not in detail:
+                        detail = f"{detail} - {extra}"
+            # Also try to include body saved on exception even if read succeeded earlier
         else:
             detail = f"{type(e).__name__}: {e}"
         if not detail.strip():
@@ -816,27 +880,92 @@ def _beszel_urlopen(req):
         # dönüşü, kullanıcı test butonuna bastığında uzun beklemek yerine.
         return urllib.request.urlopen(req, timeout=6)
     except urllib.error.HTTPError as e:
+        # Preserve HTTP body for _beszel_format_error and _beszel_login fallback
         try:
-            e.close()
+            body = e.read().decode("utf-8", "replace")
+            e._body = body[:2000]
         except Exception:
-            pass
+            try:
+                # fallback via fp if e.read() already consumed
+                if getattr(e, "fp", None) is not None:
+                    try:
+                        raw = e.fp.read()
+                        if raw:
+                            e._body = raw.decode("utf-8", "replace")[:2000] if isinstance(raw, bytes) else str(raw)[:2000]
+                        else:
+                            e._body = ""
+                    except Exception:
+                        e._body = ""
+                else:
+                    e._body = ""
+            except Exception:
+                try:
+                    e._body = ""
+                except Exception:
+                    pass
+        # Do not close before raising; caller/_beszel_format_error will handle body via _body
         raise
 
 
 def _beszel_login(cfg):
-    url = cfg["url"].rstrip("/") + "/api/collections/users/auth-with-password"
-    payload = json.dumps({
-        "identity": cfg["user"],
-        "password": cfg["password"],
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=payload,
-        headers={"Content-Type": "application/json"},
-    )
-    with _beszel_urlopen(req) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-    return data.get("token")  # PocketBase-issued JWT
+    """Authenticate to PocketBase (Beszel) with fallback for _superusers.
+
+    Tries users collection first; on HTTP 400/403/404 falls back to _superusers.
+    Handles empty identity/password gracefully (PocketBase will return 400).
+    Preserves HTTPError body via e._body for detailed error reporting.
+    """
+    last_err = None
+    base_url = (cfg.get("url") or "").strip().rstrip("/")
+    user = cfg.get("user") or ""
+    password = cfg.get("password") or ""
+    for collection in ("users", "_superusers"):
+        url = base_url + f"/api/collections/{collection}/auth-with-password"
+        payload = json.dumps({
+            "identity": user,
+            "password": password,
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with _beszel_urlopen(req) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            token = data.get("token")
+            return token  # PocketBase-issued JWT
+        except urllib.error.HTTPError as e:
+            # Ensure body is captured (may already be set by _beszel_urlopen)
+            if not hasattr(e, "_body"):
+                try:
+                    body = e.read().decode("utf-8", "replace")
+                    e._body = body[:2000]
+                except Exception:
+                    try:
+                        if getattr(e, "fp", None) is not None:
+                            raw = e.fp.read()
+                            if raw:
+                                e._body = raw.decode("utf-8", "replace")[:2000] if isinstance(raw, bytes) else str(raw)[:2000]
+                            else:
+                                e._body = ""
+                        else:
+                            e._body = ""
+                    except Exception:
+                        try:
+                            e._body = ""
+                        except Exception:
+                            pass
+            last_err = e
+            if collection == "users" and e.code in (400, 403, 404):
+                continue
+            else:
+                raise
+        except Exception as e:
+            # Non-HTTP errors (network, timeout) are not fallback-eligible
+            raise
+    if last_err is not None:
+        raise last_err
+    raise RuntimeError("beszel login failed")
 
 
 def _beszel_systems(cfg=None):

@@ -43,3 +43,8 @@ supabase/
 README.md.bak-*
 .vercel
 .env*
+
+# Personal data / backups - never commit
+server-hub-backup*.json
+convert_backup*.py
+*.converted.json

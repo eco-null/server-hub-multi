@@ -604,7 +604,10 @@ class BeszelTests(unittest.TestCase):
         status, data, _ = self.api("/api/beszel", jar=jar)
         self.assertEqual(status, 200)
         self.assertTrue(data["enabled"])
-        self.assertEqual(data["error"], "beszel unreachable")
+        # detailed error: contains exception type and HTTP status, truncated to 200
+        self.assertIn("500", data["error"])
+        self.assertTrue("HTTPError" in data["error"] or "beszel" in data["error"].lower())
+        self.assertLessEqual(len(data["error"]), 200)
 
     def test_beszel_negative_cache_avoids_repeated_failed_auth(self):
         url = self.start_beszel()
@@ -616,11 +619,12 @@ class BeszelTests(unittest.TestCase):
         self.login(jar)
         status, data, _ = self.api("/api/beszel", jar=jar)
         self.assertEqual(data["enabled"], True)
-        self.assertEqual(data["error"], "beszel unreachable")
+        self.assertIn("500", data["error"])
+        self.assertLessEqual(len(data["error"]), 200)
         self.assertEqual(BeszelStubHandler.auth_hits, 1)
         # A second request within the TTL must not hammer Beszel again.
         status, data, _ = self.api("/api/beszel", jar=jar)
-        self.assertEqual(data["error"], "beszel unreachable")
+        self.assertIn("500", data["error"])
         self.assertEqual(BeszelStubHandler.auth_hits, 1)
 
     def test_beszel_logs_in_for_token(self):
