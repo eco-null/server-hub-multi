@@ -211,4 +211,3 @@ Serving over HTTP is required — browsers may restrict `localStorage` on `file:
 
 ---
 
-**About:** This repository's GitHub **About** website is **[https://server-hub-gules.vercel.app](https://server-hub-gules.vercel.app)**.
