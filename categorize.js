@@ -66,7 +66,7 @@ function autoCategorize(name, url, desc) {
 
 function hostOf(url) {
   if (!url) return '';
-  try { return new URL(url.startsWith('http') ? url : 'https://' + url).host; } catch { return url; }
+  try { return new URL(url.startsWith('http') ? url : 'https://' + url).host; } catch { return ''; }
 }
 function pathOf(url) {
   if (!url) return '';

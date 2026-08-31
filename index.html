@@ -789,8 +789,14 @@
   // Serverless cold-start'ta ilk istek 500 dönebilir — 500/503/504'te sessizce
   // tekrar dene (çok kısa gecikme). 401 asla retry edilmez (session sorunu).
   async function fetchWithRetry(url, opts, retries = 2) {
+    let r;
     for (let i = 0; i <= retries; i++) {
-      const r = await fetch(url, opts || { cache: 'no-store' });
+      try {
+        r = await fetch(url, opts || { cache: 'no-store' });
+      } catch (e) {
+        if (i < retries) { await new Promise(res => setTimeout(res, 700 * (i + 1))); continue; }
+        throw e;
+      }
       if (r.status !== 500 && r.status !== 503 && r.status !== 504) return r;
       if (i < retries) await new Promise(res => setTimeout(res, 700 * (i + 1)));
     }
@@ -812,6 +818,7 @@
 
   async function loadServices() {
     SERVICES = await fetchServices();
+    _servicesVersion++;
     renderGroups();
     return SERVICES;
   }
@@ -832,7 +839,6 @@
     for (const s of candidates) {
       const key = s.url + '|' + s.name;
       if (existing.has(key)) continue;
-      existing.add(key);
       try {
         const r = await fetch(API_SERVICES, {
           method: 'POST',
@@ -843,7 +849,7 @@
             categoryOverride: s.categoryOverride || null,
           }),
         });
-        if (r.ok) pushed++; else failed++;
+        if (r.ok) { pushed++; existing.add(key); } else failed++;
       } catch { failed++; }
     }
     if (pushed > 0 && failed === 0) {
@@ -941,17 +947,19 @@
   document.getElementById('bookmark-cancel').addEventListener('click', closeBookmarkEditor);
 
   // Categorize at render time using categorize.js — memoized per SERVICES reference
+  let _servicesVersion = 0;
   let _catCache = null;
   let _catCacheRef = null;
   let _catCacheLen = -1;
+  let _catCacheVersion = -1;
   function categorized() {
-    if (_catCache && _catCacheRef === SERVICES && _catCacheLen === SERVICES.length) return _catCache;
+    if (_catCache && _catCacheRef === SERVICES && _catCacheLen === SERVICES.length && _catCacheVersion === _servicesVersion) return _catCache;
     const out = SERVICES.map(s => {
       const override = s.categoryOverride;
       const auto = override ? { category: override, matched: '(override)' } : window.autoCategorize(s.name, s.url, s.desc);
       return { ...s, category: auto.category, matched: auto.matched };
     });
-    _catCache = out; _catCacheRef = SERVICES; _catCacheLen = SERVICES.length;
+    _catCache = out; _catCacheRef = SERVICES; _catCacheLen = SERVICES.length; _catCacheVersion = _servicesVersion;
     return out;
   }
 
@@ -1023,6 +1031,8 @@
     // Status pings: only when feature enabled; defer off-screen via IntersectionObserver
     const _pingsEnabled = window.HubSettings.get().features.statusPings !== false;
     if (_pingsEnabled) {
+      if (window._hubObserver) { try { window._hubObserver.disconnect(); } catch {} window._hubObserver = null; }
+      if (window._hubPingTimer) { clearTimeout(window._hubPingTimer); window._hubPingTimer = null; }
       const _cards = document.querySelectorAll('[data-ping-url]');
       const _obs = (() => {
         if (!('IntersectionObserver' in window)) return null;
@@ -1037,10 +1047,11 @@
           }, { rootMargin: '240px' });
         } catch { return null; }
       })();
+      window._hubObserver = _obs;
       if (_obs) {
         _cards.forEach(el => { if (el.dataset.pingUrl) _obs.observe(el); });
         // Fallback: any remaining not observed after 4s (observer edge cases) — ping
-        setTimeout(() => { _cards.forEach(el => { try{ _obs.unobserve(el);}catch{}; if (el.isConnected && el.querySelector('[data-status].status-wait, [data-status].status-idle')) pingService(el); }); }, 4200);
+        window._hubPingTimer = setTimeout(() => { _cards.forEach(el => { try{ _obs.unobserve(el);}catch{}; if (el.isConnected && el.querySelector('[data-status].status-wait, [data-status].status-idle')) pingService(el); }); }, 4200);
       } else {
         // No observer: stagger pings to avoid network burst (6 at a time)
         let _idx = 0;
@@ -1162,6 +1173,7 @@
   async function addService(entry) {
     const data = await apiJson('POST', API_SERVICES, entry);
     SERVICES = Array.isArray(data.services) ? data.services : SERVICES;
+    _servicesVersion++;
     renderGroups();
   }
 
@@ -1222,6 +1234,7 @@
     try {
       const data = await apiJson('DELETE', API_SERVICES + '/' + encodeURIComponent(id));
       SERVICES = Array.isArray(data.services) ? data.services : SERVICES;
+      _servicesVersion++;
       renderGroups();
       showToast('Link deleted');
     } catch (err) {
@@ -1298,6 +1311,7 @@
         categoryOverride: cat === 'auto' ? null : cat,
       });
       SERVICES = Array.isArray(data.services) ? data.services : SERVICES;
+      _servicesVersion++;
       closeEditModal();
       renderGroups();
       showToast('Link updated');
@@ -1469,10 +1483,16 @@
     dot.classList.remove('status-idle'); dot.classList.add('status-wait');
     dot.setAttribute('aria-label', 'checking ' + hostOf(url));
     // Defer fetch to idle on mobile to avoid scroll jank
-    const doFetch = () => fetch(url, { mode: 'no-cors', signal: ctrl.signal, cache: 'no-store', redirect: 'follow' })
-      .then(() => mark(dot, true, hostOf(url)))
-      .catch(err => mark(dot, !(err instanceof DOMException && err.name === 'AbortError') ? false : 'timeout', hostOf(url)))
-      .finally(() => { clearTimeout(tmo); _pingActive--; if (_pingQueue.length) _runPing(_pingQueue.shift()); });
+    const doFetch = () => {
+      try {
+        return fetch(url, { mode: 'no-cors', signal: ctrl.signal, cache: 'no-store', redirect: 'follow' })
+          .then(() => mark(dot, true, hostOf(url)))
+          .catch(err => { try { mark(dot, !(err instanceof DOMException && err.name === 'AbortError') ? false : 'timeout', hostOf(url)); } catch {} })
+          .finally(() => { clearTimeout(tmo); _pingActive--; if (_pingQueue.length) try { _runPing(_pingQueue.shift()); } catch {} });
+      } catch (e) {
+        clearTimeout(tmo); _pingActive--; if (_pingQueue.length) try { _runPing(_pingQueue.shift()); } catch {}
+      }
+    };
     if ('requestIdleCallback' in window) requestIdleCallback(doFetch, { timeout: 1200 });
     else setTimeout(doFetch, 0);
   }
@@ -1734,7 +1754,7 @@
         applyTheme(s.theme);
         syncThemeToggle();
       } catch {}
-      try { SERVICES = await fetchServices(); } catch {}
+      try { SERVICES = await fetchServices(); _servicesVersion++; } catch {}
       renderGroups();
       try { await loadBookmarks(); } catch {}
     }
@@ -1782,7 +1802,7 @@
             if (window.HubSettings && window.HubSettings.clear) window.HubSettings.clear();
             try { localStorage.removeItem('server-hub:services'); } catch {}
             // Force reload of per-user data for new account
-            try { SERVICES = await fetchServices(); renderGroups(); } catch {}
+            try { SERVICES = await fetchServices(); _servicesVersion++; renderGroups(); } catch {}
             try { await loadBookmarks(); } catch {}
             try { const fresh = await window.HubSettings.loadFromServer(); if (fresh) window.HubSettings.apply(fresh); } catch {}
           }
@@ -1813,7 +1833,7 @@
     openAdd: openAddModal, closeAdd: closeAddModal,
     loadServices, reloadServices: loadServices,
     autoCategorize: (n,u,d) => window.autoCategorize(n,u,d),
-    categorized, setServices: arr => { SERVICES = arr; },
+    categorized, setServices: arr => { SERVICES = arr; _servicesVersion++; },
     getSearchInput: () => searchInput,
     webSearch,
     openSearch, closeSearch,
@@ -1827,7 +1847,7 @@
   (async function boot() {
     try {
       await migrateLegacyServices();           // pushes any legacy local links, clears local keys
-      SERVICES = await fetchServices();        // always re-fetch the authoritative list after migration
+      SERVICES = await fetchServices(); _servicesVersion++;        // always re-fetch the authoritative list after migration
       renderGroups();
     } catch {
       document.getElementById('api-offline').classList.remove('hidden');

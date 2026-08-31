@@ -79,6 +79,23 @@ const DEFAULTS = Object.freeze({
 
 // --- beszel password kept only in memory and server, never in localStorage ---
 let _memoryBeszelPassword = '';
+// read() memoization — cache last raw string and parsed result
+let _readCacheRawStr = null;
+let _readCacheResult = null;
+let _readCachePassword = null;
+// wallpaper helpers — cache DOM lookup + race guard
+let wallpaperElCache = null;
+let wallpaperSeq = 0;
+function _getWallpaperEl() {
+  if (wallpaperElCache) return wallpaperElCache;
+  try { wallpaperElCache = document.getElementById('wallpaper'); } catch { wallpaperElCache = null; }
+  return wallpaperElCache;
+}
+function _invalidateReadCache() {
+  _readCacheRawStr = null;
+  _readCacheResult = null;
+  _readCachePassword = null;
+}
 function _sanitizeForLocal(settings) {
   try {
     const copy = JSON.parse(JSON.stringify(settings));
@@ -91,8 +108,13 @@ function _isValidHttpUrl(s) {
 }
 
 function read() {
+  let rawStr;
+  try { rawStr = safeStorage.getItem(SETTINGS_KEY) || '{}'; } catch { rawStr = '{}'; }
+  if (rawStr === _readCacheRawStr && _readCacheResult !== null && _readCachePassword === _memoryBeszelPassword) {
+    return _readCacheResult;
+  }
   try {
-    const raw = JSON.parse(safeStorage.getItem(SETTINGS_KEY) || '{}');
+    const raw = JSON.parse(rawStr);
     const merged = deepMerge(structuredCloneSafe(DEFAULTS), raw);
     if (_memoryBeszelPassword) {
       merged.beszel = merged.beszel || { url: '', user: '', password: '' };
@@ -101,10 +123,16 @@ function read() {
       delete merged.beszel.password;
       merged.beszel.password = '';
     }
+    _readCacheRawStr = rawStr;
+    _readCacheResult = merged;
+    _readCachePassword = _memoryBeszelPassword;
     return merged;
   } catch {
     const fallback = structuredCloneSafe(DEFAULTS);
     if (_memoryBeszelPassword) fallback.beszel.password = _memoryBeszelPassword;
+    _readCacheRawStr = rawStr;
+    _readCacheResult = fallback;
+    _readCachePassword = _memoryBeszelPassword;
     return fallback;
   }
 }
@@ -175,6 +203,8 @@ function set(partial) {
     next.beszel.password = _memoryBeszelPassword;
   }
   try { safeStorage.setItem(SETTINGS_KEY, JSON.stringify(_sanitizeForLocal(next))); } catch {}
+  _invalidateReadCache();
+  try { _readCacheRawStr = safeStorage.getItem(SETTINGS_KEY) || '{}'; _readCacheResult = next; _readCachePassword = _memoryBeszelPassword; } catch {}
   _saveToServer(originalPartial);
   emit(next);
   return next;
@@ -226,6 +256,8 @@ async function loadFromServer() {
           next = deepMerge(structuredCloneSafe(DEFAULTS), remote);
           if (_memoryBeszelPassword) { next.beszel = next.beszel || {}; next.beszel.password = _memoryBeszelPassword; }
           try { safeStorage.setItem(SETTINGS_KEY, JSON.stringify(_sanitizeForLocal(next))); } catch {}
+          _invalidateReadCache();
+          try { _readCacheRawStr = safeStorage.getItem(SETTINGS_KEY) || '{}'; _readCacheResult = next; _readCachePassword = _memoryBeszelPassword; } catch {}
         } else {
           next = cur;
         }
@@ -240,6 +272,8 @@ async function loadFromServer() {
         // ensure any non-default top-level key in cur not present in remote is removed
         // (next already doesn't have it).
         try { safeStorage.setItem(SETTINGS_KEY, JSON.stringify(_sanitizeForLocal(next))); } catch {}
+        _invalidateReadCache();
+        try { _readCacheRawStr = safeStorage.getItem(SETTINGS_KEY) || '{}'; _readCacheResult = next; _readCachePassword = _memoryBeszelPassword; } catch {}
       }
       emit(next);
       return next;
@@ -260,7 +294,11 @@ function clear() {
   try { safeStorage.removeItem(SETTINGS_KEY); } catch {}
   try { safeStorage.removeItem('server-hub:services'); } catch {}
   try { safeStorage.removeItem('server-hub:theme'); } catch {}
+  _invalidateReadCache();
   const next = structuredCloneSafe(DEFAULTS);
+  _readCacheRawStr = '{}';
+  _readCacheResult = next;
+  _readCachePassword = _memoryBeszelPassword;
   emit(next);
   return next;
 }
@@ -374,12 +412,13 @@ function applyWallpaper(s) {
     body.style.backgroundSize = 'auto';
   }
   if (w.mode === 'gradient' && GRADIENTS[w.gradient]) {
+    wallpaperSeq++;
     body.classList.add('wallpaper', 'wp-active');
     // Light theme uses the bright palette; dark theme keeps the rich palette.
     const isLightTheme = s && !isDark(s);
     const palette = buildGradient(w.gradient, isLightTheme, showGrid);
     body.style.setProperty('--wp-image', palette);
-    const wallpaperEl = document.getElementById('wallpaper');
+    const wallpaperEl = _getWallpaperEl();
     if (wallpaperEl) {
       if (showGrid) {
         wallpaperEl.style.backgroundSize = '32px 32px, 32px 32px, cover';
@@ -396,8 +435,9 @@ function applyWallpaper(s) {
     setBlobs(true);
   } else if (w.mode === 'custom' && w.url) {
     if (!_isValidHttpUrl(w.url)) {
+      wallpaperSeq++;
       body.style.removeProperty('--wp-image');
-      const wallpaperElBad = document.getElementById('wallpaper');
+      const wallpaperElBad = _getWallpaperEl();
       if (wallpaperElBad) wallpaperElBad.style.backgroundSize = '';
       setBlobs(true);
       return;
@@ -409,7 +449,7 @@ function applyWallpaper(s) {
     const urlPart = 'url("' + escapedUrl + '")';
     const combined = gridOverlay ? gridOverlay + ', ' + urlPart : urlPart;
     body.style.setProperty('--wp-image', combined);
-    const wallpaperElCustom = document.getElementById('wallpaper');
+    const wallpaperElCustom = _getWallpaperEl();
     if (wallpaperElCustom) {
       if (showGrid) {
         wallpaperElCustom.style.backgroundSize = '32px 32px, 32px 32px, cover';
@@ -420,10 +460,13 @@ function applyWallpaper(s) {
       }
     }
     setBlobs(false);
+    const seq = ++wallpaperSeq;
     sampleImageLuminance(w.url).then(dark => {
+      if (seq !== wallpaperSeq) return;
       root.classList.toggle('wallpaper-dark', dark);
       root.classList.toggle('wallpaper-light', !dark);
     }).catch(err => {
+      if (seq !== wallpaperSeq) return;
       if (err && err.tainted) {
         // Image loaded but pixels can't be read (no CORS). Keep the wallpaper
         // and default to dark — better than silently dropping a working image.
@@ -436,8 +479,9 @@ function applyWallpaper(s) {
       try { window.__hubToast && window.__hubToast('Wallpaper failed to load — reverted'); } catch {}
     });
   } else {
+    wallpaperSeq++;
     body.style.removeProperty('--wp-image');
-    const wallpaperEl = document.getElementById('wallpaper');
+    const wallpaperEl = _getWallpaperEl();
     if (wallpaperEl) wallpaperEl.style.backgroundSize = '';
     // Respect showGrid for none/custom too (body grid)
     if (!showGrid) {

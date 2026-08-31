@@ -33,7 +33,35 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 WEB_ROOT = os.path.dirname(os.path.abspath(__file__))
+WEB_ROOT_REAL = os.path.realpath(WEB_ROOT)
 SESSION_TTL = 30 * 24 * 60 * 60  # 30 days
+
+# Precompiled regexes (perf)
+_EMAIL_RE = re.compile(r"^[^@]+@[^@]+\.[^@]+$")
+_USERNAME_RE = re.compile(r"^[a-zA-Z0-9_]{3,20}$")
+_URL_RE = re.compile(r"^https?://")
+_URL_RE_I = re.compile(r"^https?://", re.IGNORECASE)
+
+# Security header constants (avoid rebuilding per request)
+CSP_VALUE = "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com; font-src 'self' https://fonts.gstatic.com; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; connect-src 'self'; frame-ancestors 'self'"
+PERM_POLICY = "camera=(), microphone=(), geolocation=()"
+SEC_HEADERS = (
+    ("X-Content-Type-Options", "nosniff"),
+    ("X-Frame-Options", "SAMEORIGIN"),
+    ("Referrer-Policy", "no-referrer"),
+    ("Content-Security-Policy", CSP_VALUE),
+    ("Permissions-Policy", PERM_POLICY),
+)
+_host_cache_lock = threading.Lock()
+
+
+def _security_headers(path, is_https):
+    hdrs = list(SEC_HEADERS)
+    if path.startswith("/api/"):
+        hdrs.append(("Cache-Control", "no-store"))
+    if is_https:
+        hdrs.append(("Strict-Transport-Security", "max-age=63072000"))
+    return hdrs
 MAX_ATTEMPTS = 5
 LOCKOUT_SECONDS = 60
 MAX_LOGIN_BODY = 64 * 1024  # reject larger login POST bodies before reading them
@@ -115,7 +143,7 @@ def validate_service(data, partial=False):
             return None, "url too long"
         if " " in url:
             return None, "url must not contain spaces"
-        if not re.match(r"^https?://", url):
+        if not _URL_RE.match(url):
             return None, "url must start with http:// or https://"
         try:
             if not urllib.parse.urlparse(url).netloc:
@@ -161,7 +189,7 @@ def validate_bookmark(data, partial=False):
             return None, "url too long"
         if " " in url:
             return None, "url must not contain spaces"
-        if not re.match(r"^https?://", url):
+        if not _URL_RE.match(url):
             return None, "url must start with http:// or https://"
         try:
             if not urllib.parse.urlparse(url).netloc:
@@ -283,6 +311,12 @@ MIME = {
     ".txt": "text/plain; charset=utf-8",
     ".map": "application/json; charset=utf-8",
     ".md": "text/plain; charset=utf-8",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+    ".gif": "image/gif",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
 }
 
 # Allowed static extensions for authenticated fallback — derived from MIME plus common web assets, minus sensitive
@@ -315,6 +349,14 @@ class Sessions:
         if not env_secret and os.environ.get("VERCEL"):
             raise RuntimeError("SESSION_SECRET must be set on Vercel (fleet needs stable HMAC key) — see MED-06")
         self._secret = env_secret or secrets.token_hex(32)
+        self._secret_b = self._secret.encode("utf-8")
+
+    def _hmac(self, b64):
+        return hmac.new(self._secret_b, b64.encode("utf-8"), hashlib.sha256).hexdigest()
+
+    def _b64json(self, b64):
+        raw = base64.urlsafe_b64decode(b64 + "=" * (-len(b64) % 4))
+        return json.loads(raw.decode("utf-8"))
 
     # ---- legacy in-memory API ----
     def create(self, user):
@@ -365,7 +407,7 @@ class Sessions:
             payload["typ"] = typ
         raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
         b64 = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
-        sig = hmac.new(self._secret.encode("utf-8"), b64.encode("utf-8"), hashlib.sha256).hexdigest()
+        sig = self._hmac(b64)
         return b64 + "." + sig
 
     def verify_signed(self, token):
@@ -374,11 +416,10 @@ class Sessions:
             return None
         b64, sig = token.rsplit(".", 1)
         try:
-            expected = hmac.new(self._secret.encode("utf-8"), b64.encode("utf-8"), hashlib.sha256).hexdigest()
+            expected = self._hmac(b64)
             if not hmac.compare_digest(sig, expected):
                 return None
-            raw = base64.urlsafe_b64decode(b64 + "=" * (-len(b64) % 4))
-            payload = json.loads(raw.decode("utf-8"))
+            payload = self._b64json(b64)
         except Exception:
             return None
         if int(payload.get("exp", 0)) < time.time():
@@ -401,11 +442,10 @@ class Sessions:
             return None
         b64, sig = token.rsplit(".", 1)
         try:
-            expected = hmac.new(self._secret.encode("utf-8"), b64.encode("utf-8"), hashlib.sha256).hexdigest()
+            expected = self._hmac(b64)
             if not hmac.compare_digest(sig, expected):
                 return None
-            raw = base64.urlsafe_b64decode(b64 + "=" * (-len(b64) % 4))
-            payload = json.loads(raw.decode("utf-8"))
+            payload = self._b64json(b64)
         except Exception:
             return None
         if int(payload.get("exp", 0)) < time.time():
@@ -432,24 +472,26 @@ class LoginGuard:
         self._lock = threading.Lock()
 
     def is_locked(self, ip):
+        now = time.time()
         with self._lock:
             entry = self._state.get(ip)
             if not entry:
                 return False
             fails, locked_until = entry
-            if locked_until and time.time() < locked_until:
+            if locked_until and now < locked_until:
                 return True
             if locked_until:
                 self._state[ip] = (0, 0)
             return False
 
     def record_failure(self, ip):
+        now = time.time()
         with self._lock:
             fails, locked_until = self._state.get(ip, (0, 0))
             fails += 1
             if fails >= self.max_attempts:
                 fails = 0
-                locked_until = time.time() + self.lockout_seconds
+                locked_until = now + self.lockout_seconds
             self._state[ip] = (fails, locked_until)
 
     def reset(self, ip):
@@ -469,16 +511,16 @@ class RegisterGuard:
         self._lock = threading.Lock()
 
     def is_limited(self, ip):
+        now = time.time()
         with self._lock:
-            now = time.time()
             lst = self._state.get(ip, [])
             lst = [t for t in lst if now - t < self.window_seconds]
             self._state[ip] = lst
             return len(lst) >= self.max_per_window
 
     def record(self, ip):
+        now = time.time()
         with self._lock:
-            now = time.time()
             lst = self._state.get(ip, [])
             lst = [t for t in lst if now - t < self.window_seconds]
             lst.append(now)
@@ -569,15 +611,17 @@ _host_cache = {"host": None, "ts": 0}
 
 def _get_host():
     now = time.time()
-    if _host_cache["host"] is not None and now - _host_cache["ts"] < 300:
-        return _host_cache["host"]
+    with _host_cache_lock:
+        if _host_cache["host"] is not None and now - _host_cache["ts"] < 300:
+            return _host_cache["host"]
     try:
         with open("/etc/hostname") as f:
             host = f.read().strip() or socket.gethostname()
     except OSError:
         host = socket.gethostname()
-    _host_cache["host"] = host
-    _host_cache["ts"] = now
+    with _host_cache_lock:
+        _host_cache["host"] = host
+        _host_cache["ts"] = now
     return host
 
 def stats_payload():
@@ -630,7 +674,7 @@ def _validate_beszel_url(url):
     if not url or not isinstance(url, str):
         return False, "url required"
     url = url.strip()
-    if not re.match(r"^https?://", url, re.IGNORECASE):
+    if not _URL_RE_I.match(url):
         return False, "url must start with http:// or https://"
     try:
         parsed = urllib.parse.urlparse(url)
@@ -672,9 +716,18 @@ def totp_verify(secret_b32, code, window=1):
     code = str(code).strip()
     if len(code) != 6 or not code.isdigit():
         return False
+    try:
+        key = base64.b32decode(secret_b32.upper() + "=" * ((8 - len(secret_b32) % 8) % 8))
+    except Exception:
+        return False
     now = int(time.time())
     for i in range(-window, window + 1):
-        if hmac.compare_digest(totp_code(secret_b32, now + i * 30), code):
+        counter = (now + i * 30) // 30
+        msg = struct.pack(">Q", counter)
+        digest = hmac.new(key, msg, hashlib.sha1).digest()
+        offset = digest[19] & 0x0F
+        calc = (struct.unpack(">I", digest[offset:offset + 4])[0] & 0x7FFFFFFF) % 1000000
+        if hmac.compare_digest("%06d" % calc, code):
             return True
     return False
 
@@ -785,6 +838,7 @@ def _beszel_systems(cfg=None):
         pass
     now = time.time()
     cache_key = json.dumps(cfg, sort_keys=True)
+    # singleflight: check cache under lock, release for network fetch, re-acquire to populate
     with _beszel_cache_lock:
         cached = _beszel_cache.get(cache_key)
         if cached and now - cached[0] < BESZEL_CACHE_TTL:
@@ -847,21 +901,8 @@ class HubHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
-        # ---- Security headers (her yanıtta) ----
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("X-Frame-Options", "SAMEORIGIN")
-        self.send_header("Referrer-Policy", "no-referrer")
-        self.send_header("Content-Security-Policy",
-                         "default-src 'self'; img-src 'self' data: https:; "
-                         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com; "
-                         "font-src 'self' https://fonts.gstatic.com; "
-                         "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; "
-                         "connect-src 'self'; frame-ancestors 'self'")
-        self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-        if self.path.startswith("/api/"):
-            self.send_header("Cache-Control", "no-store")
-        if self.headers.get("X-Forwarded-Proto") == "https":
-            self.send_header("Strict-Transport-Security", "max-age=63072000")
+        for k, v in _security_headers(self.path, self.headers.get("X-Forwarded-Proto") == "https"):
+            self.send_header(k, v)
         for key, value in (extra_headers or {}).items():
             self.send_header(key, value)
         # Token refresh sırasında yeni imzalı cookie bu yanıta eklenir.
@@ -876,20 +917,8 @@ class HubHandler(BaseHTTPRequestHandler):
         self.send_response(302)
         self.send_header("Location", location)
         self.send_header("Content-Length", "0")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("X-Frame-Options", "SAMEORIGIN")
-        self.send_header("Referrer-Policy", "no-referrer")
-        self.send_header("Content-Security-Policy",
-                         "default-src 'self'; img-src 'self' data: https:; "
-                         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com; "
-                         "font-src 'self' https://fonts.gstatic.com; "
-                         "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; "
-                         "connect-src 'self'; frame-ancestors 'self'")
-        self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-        if self.path.startswith("/api/"):
-            self.send_header("Cache-Control", "no-store")
-        if self.headers.get("X-Forwarded-Proto") == "https":
-            self.send_header("Strict-Transport-Security", "max-age=63072000")
+        for k, v in _security_headers(self.path, self.headers.get("X-Forwarded-Proto") == "https"):
+            self.send_header(k, v)
         for key, value in (extra_headers or {}).items():
             self.send_header(key, value)
         pending = getattr(self, "_pending_cookie", None)
@@ -925,15 +954,10 @@ class HubHandler(BaseHTTPRequestHandler):
             return None, "invalid JSON"
 
     def session_user(self):
-        # Reject pending tokens explicitly (2FA bypass fix)
         _raw = self.read_cookie("hub_session")
-        if _raw:
-            # verify_pending returns user only for typ==pending; if it succeeds, this is a pending token -> reject
-            try:
-                if self.server.sessions.verify_pending(_raw) is not None:
-                    return None
-            except Exception:
-                pass
+        if not _raw:
+            return None
+        # Single HMAC verify: verify_signed already rejects pending tokens (typ==pending)
         user = self.server.sessions.get(_raw)
         # Transparent token refresh: Supabase access tokens live ~1h; the
         # signed cookie lives 30d. If the cookie's token_exp has passed,
@@ -1397,17 +1421,17 @@ class HubHandler(BaseHTTPRequestHandler):
     def serve_file(self, rel):
         if not rel:
             return self.send_bytes("Not found", 404)
-        # loop-decode percent-encoding until stable to prevent double-encoding traversals
+        # loop-decode percent-encoding until stable to prevent double-encoding traversals (max 3 iterations)
         decoded = rel
-        prev = None
-        while decoded != prev:
-            prev = decoded
-            decoded = urllib.parse.unquote(prev)
+        for _ in range(3):
+            nxt = urllib.parse.unquote(decoded)
+            if nxt == decoded:
+                break
+            decoded = nxt
         rel = decoded
-        # Resolve symlinks and enforce WEB_ROOT containment
-        web_root_real = os.path.realpath(WEB_ROOT)
-        full = os.path.realpath(os.path.join(web_root_real, rel))
-        if full != web_root_real and not full.startswith(web_root_real + os.sep):
+        # Resolve symlinks and enforce WEB_ROOT containment (reuse WEB_ROOT_REAL)
+        full = os.path.realpath(os.path.join(WEB_ROOT_REAL, rel))
+        if full != WEB_ROOT_REAL and not full.startswith(WEB_ROOT_REAL + os.sep):
             return self.send_bytes("Forbidden", 403)
         if not os.path.isfile(full):
             return self.send_bytes("Not found", 404)
@@ -1416,7 +1440,7 @@ class HubHandler(BaseHTTPRequestHandler):
         # block .env variants, services.json, supabase/, .git/, .vercel/ and sensitive extensions
         if low_rel == ".env" or low_rel.startswith(".env.") or "/.env" in low_rel or low_rel.endswith("/.env"):
             return self.send_bytes("Not found", 404)
-        if "services.json" in low_rel:
+        if low_rel == "services.json" or low_rel.endswith("/services.json"):
             return self.send_bytes("Not found", 404)
         parts = low_rel.split("/")
         if any(seg in ("supabase", ".git", ".vercel") for seg in parts):
@@ -1427,9 +1451,31 @@ class HubHandler(BaseHTTPRequestHandler):
         if ext not in ALLOWED_STATIC:
             return self.send_bytes("Not found", 404)
         ctype = MIME.get(ext, "application/octet-stream")
+        try:
+            st = os.stat(full)
+            etag = '"%x-%x"' % (int(st.st_mtime), st.st_size)
+        except OSError:
+            etag = None
+        if etag and self.headers.get("If-None-Match") == etag:
+            self.send_response(304)
+            self.send_header("ETag", etag)
+            if ext in (".html", ".htm"):
+                self.send_header("Cache-Control", "no-cache")
+            else:
+                self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            return
         with open(full, "rb") as f:
             body = f.read()
-        return self.send_bytes(body, 200, ctype, {"Cache-Control": "no-cache"})
+        headers = {}
+        if etag:
+            headers["ETag"] = etag
+        if ext in (".html", ".htm"):
+            headers["Cache-Control"] = "no-cache"
+        else:
+            headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return self.send_bytes(body, 200, ctype, headers)
 
     # ---- routes ----
 
@@ -1527,8 +1573,7 @@ class HubHandler(BaseHTTPRequestHandler):
         if origin:
             ref = self.headers.get("Host", "")
             try:
-                from urllib.parse import urlparse
-                o_host = urlparse(origin).netloc
+                o_host = urllib.parse.urlparse(origin).netloc
             except ValueError:
                 return True
             if o_host and o_host != ref:
@@ -1619,11 +1664,11 @@ class HubHandler(BaseHTTPRequestHandler):
                 if not username or "@" in username:
                     username = (email.split("@")[0] if "@" in email else username) or "user"
                 # Validate email, username, password — specific errors to surface correct message
-                if not re.match(r"^[^@]+@[^@]+\.[^@]+$", email):
+                if not _EMAIL_RE.match(email):
                     guard.record_failure(ip)
                     return self.redirect("/login?show=signup&error=invalid_email")
                 # Username: 3-20 chars, alphanumeric + underscore, not an email
-                if not re.match(r"^[a-zA-Z0-9_]{3,20}$", username):
+                if not _USERNAME_RE.match(username):
                     guard.record_failure(ip)
                     return self.redirect("/login?show=signup&error=invalid_username")
                 if len(password) < 8:

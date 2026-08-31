@@ -396,6 +396,7 @@
         var err = params.get("error");
 
         var show = function (id) {
+          document.querySelectorAll('.error:not(.hidden)').forEach(function (el) { el.classList.add('hidden'); });
           var el = document.getElementById(id);
           if (el) el.classList.remove("hidden");
         };

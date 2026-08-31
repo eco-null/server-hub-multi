@@ -63,7 +63,14 @@ class SupabaseClient:
                 detail = json.loads(e.read().decode("utf-8", "replace"))
             except Exception:
                 detail = {"message": str(e)}
+            finally:
+                try:
+                    e.close()
+                except Exception:
+                    pass
             raise SupabaseError(e.code, detail.get("message") or detail.get("error_description") or str(e)) from e
+        except urllib.error.URLError as e:
+            raise SupabaseError(502, str(e)) from e
 
     # ---- Auth ----
 

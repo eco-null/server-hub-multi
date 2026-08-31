@@ -4,7 +4,6 @@
 
 -- 0) Required extensions (pgcrypto provides crypt/gen_salt/gen_random_uuid)
 create extension if not exists pgcrypto with schema extensions;
-create extension if not exists pgcrypto;
 
 -- 1) Profiller — auth.users ile 1:1
 create table if not exists public.profiles (
@@ -61,6 +60,9 @@ create index if not exists user_logs_user_idx on public.user_logs (user_id, crea
 -- performance: covering indexes for FKs (fixes unindexed_foreign_keys lint)
 create index if not exists user_services_user_id_idx on public.user_services (user_id);
 create index if not exists user_bookmarks_user_id_idx on public.user_bookmarks (user_id);
+create index if not exists user_services_user_created_idx on public.user_services (user_id, created_at);
+create index if not exists user_bookmarks_user_created_idx on public.user_bookmarks (user_id, created_at);
+create index if not exists auth_users_username_meta_idx on auth.users ((raw_user_meta_data->>'username'));
 
 -- ---------------------------------------------------------------------------
 -- Validation CHECKs (prevents oversized / malformed rows)
@@ -220,7 +222,7 @@ begin
   uname := coalesce(nullif(trim(username),''), split_part(email,'@',1));
   -- username uniqueness check (also via profiles unique, but give friendly error)
   if exists (select 1 from public.profiles where username = uname) then return json_build_object('error','username exists'); end if;
-  enc := extensions.crypt(password, extensions.gen_salt('bf',6));
+  enc := extensions.crypt(password, extensions.gen_salt('bf',10));
   insert into auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at, confirmation_token, recovery_token)
   values ('00000000-0000-0000-0000-000000000000'::uuid, new_id, 'authenticated','authenticated', email, enc, now(), jsonb_build_object('provider','email','providers',array['email']), jsonb_build_object('username',uname), now(), now(), '', '') ;
   -- CRIT-04: GoTrue requires identities row for email provider

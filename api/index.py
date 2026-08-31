@@ -160,9 +160,9 @@ def application(environ, start_response):
         body_err = b'{"error":"payload too large"}'
         start_response("413 Payload Too Large", [("Content-Type", "application/json"), ("Content-Length", str(len(body_err)))])
         return [body_err]
-    # Also guard against missing CONTENT_LENGTH but huge chunked body: read at most max_body+1
+    # Also guard against missing CONTENT_LENGTH but huge chunked body: read exactly content_length
     if content_length > 0:
-        body = environ["wsgi.input"].read(min(content_length, max_body+1))
+        body = environ["wsgi.input"].read(content_length)
         if len(body) > max_body:
             body_err = b'{"error":"payload too large"}'
             start_response("413 Payload Too Large", [("Content-Type", "application/json"), ("Content-Length", str(len(body_err)))])
