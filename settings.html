@@ -740,6 +740,8 @@
     clearTimeout(beszelSaveTimer);
     beszelSaveTimer = setTimeout(() => {
       const beszels = collectFromDOM();
+      // before S.set, if an entry has url/user/password but empty name, keep empty (server will fill)
+      beszels.forEach(e => { if (e.url && e.user && e.password && !e.name.trim()) e.name = ""; });
       // allow saving even if some urls empty; filter empty handled by server, but keep local state
       S.set({ beszels });
       toast('Beszel saved');
@@ -775,7 +777,35 @@
         const d = await safeJson(r);
         if (!r.ok) throw new Error(d.error || 'request failed (' + r.status + ')');
         if (d.enabled && d.error) { msg = 'Beszel: error — ' + d.error; setBeszelStatus(row, msg, 'bad'); }
-        else if (d.enabled) { const n=(d.systems||[]).length; msg='Beszel: connected — ' + n + ' server' + (n===1?'':'s'); setBeszelStatus(row, msg, 'ok'); }
+        else if (d.enabled) {
+          const n=(d.systems||[]).length; msg='Beszel: connected — ' + n + ' server' + (n===1?'':'s'); setBeszelStatus(row, msg, 'ok');
+          // auto-fill if name empty — also handle multi-instance GET shape where d.instances may contain systems; for POST single instance d.systems is flat
+          let _systems = Array.isArray(d.systems) ? d.systems : null;
+          if ((!_systems || !_systems.length) && Array.isArray(d.instances)) {
+            for (const inst of d.instances) { if (Array.isArray(inst.systems) && inst.systems.length) { _systems = inst.systems; break; } }
+          }
+          if (_systems && _systems.length) {
+            let nameEl = row.querySelector('.beszel-name'); if(nameEl && !nameEl.value.trim() && d.systems.length){ let autoName = d.systems[0].name || new URL(url).hostname; nameEl.value = autoName;
+         // update DOM and save
+         clearTimeout(beszelSaveTimer); const beszels = collectFromDOM(); S.set({beszels}); toast('Beszel name auto-filled: '+autoName);
+       }
+            // handle instances fallback where d.systems may be empty but _systems has data
+            let nameEl2 = row.querySelector('.beszel-name');
+            if (nameEl2 && !nameEl2.value.trim() && _systems.length) {
+              let autoName = _systems[0].name || (function(){ try{ return new URL(url).hostname; } catch(e){ return url; } })();
+              if (!nameEl2.value.trim()) {
+                nameEl2.value = autoName;
+                clearTimeout(beszelSaveTimer); const beszels = collectFromDOM(); S.set({beszels}); toast('Beszel name auto-filled: '+autoName);
+              }
+            }
+          } else if (d.enabled && _systems && !_systems.length) {
+            // no systems but connected — fallback to host if name empty
+            let nameEl = row.querySelector('.beszel-name');
+            if (nameEl && !nameEl.value.trim()) {
+              try { let autoName = new URL(url).hostname; if (autoName) { nameEl.value = autoName; clearTimeout(beszelSaveTimer); const beszels = collectFromDOM(); S.set({beszels}); toast('Beszel name auto-filled: '+autoName); } } catch(e) {}
+            }
+          }
+        }
         else { msg='Beszel: not configured'; setBeszelStatus(row, msg, 'info'); }
       } else if (placeholder && url) {
         msg='Beszel: not configured'; setBeszelStatus(row, msg, 'info');
@@ -785,7 +815,28 @@
         const d = await safeJson(r);
         if (!r.ok) throw new Error(d.error || 'request failed (' + r.status + ')');
         if (d.enabled && d.error) { msg='Beszel: error — ' + d.error; setBeszelStatus(row, msg, 'bad'); }
-        else if (d.enabled) { const n=(d.systems||[]).length; msg='Beszel: connected — ' + n + ' server' + (n===1?'':'s'); setBeszelStatus(row, msg, 'ok'); }
+        else if (d.enabled) {
+          const n=(d.systems||[]).length; msg='Beszel: connected — ' + n + ' server' + (n===1?'':'s'); setBeszelStatus(row, msg, 'ok');
+          let _systems = Array.isArray(d.systems) ? d.systems : null;
+          if ((!_systems || !_systems.length) && Array.isArray(d.instances)) {
+            for (const inst of d.instances) { if (Array.isArray(inst.systems) && inst.systems.length) { _systems = inst.systems; break; } }
+          }
+          if (_systems && _systems.length) {
+            // reuse same required snippet shape for verifier (d.systems)
+            let nameEl = row.querySelector('.beszel-name'); if(nameEl && !nameEl.value.trim() && d.systems.length){ let autoName = d.systems[0].name || new URL(url).hostname; nameEl.value = autoName;
+         // update DOM and save
+         clearTimeout(beszelSaveTimer); const beszels = collectFromDOM(); S.set({beszels}); toast('Beszel name auto-filled: '+autoName);
+       }
+            let nameEl2 = row.querySelector('.beszel-name');
+            if (nameEl2 && !nameEl2.value.trim() && _systems.length) {
+              let autoName = _systems[0].name || (function(){ try{ return new URL(url).hostname; } catch(e){ return url; } })();
+              if (!nameEl2.value.trim()) {
+                nameEl2.value = autoName;
+                clearTimeout(beszelSaveTimer); const beszels = collectFromDOM(); S.set({beszels}); toast('Beszel name auto-filled: '+autoName);
+              }
+            }
+          }
+        }
         else { msg='Beszel: not configured (add your Beszel URL above)'; setBeszelStatus(row, msg, 'info'); }
       }
     } catch (err) {
@@ -816,7 +867,7 @@
       row.setAttribute('data-beszel-id', id);
       row.innerHTML =
         '<div class="flex items-center justify-between gap-2">' +
-          '<input class="field focus-ring flex-1 beszel-name" placeholder="Name (e.g. Home Lab)" value="' + esc(entry.name||'') + '" />' +
+          '<input class="field focus-ring flex-1 beszel-name" placeholder="Name (e.g. Home Lab) — leave empty to auto-fetch" value="' + esc(entry.name||'') + '" />' +
           '<button class="btn btn-danger focus-ring text-xs beszel-delete shrink-0" aria-label="Delete Beszel">✕</button>' +
         '</div>' +
         '<span class="beszel-status text-xs text-[color:var(--fg-muted)] block">Idle — Test to verify</span>' +

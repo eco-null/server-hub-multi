@@ -1316,7 +1316,7 @@ class HubHandler(BaseHTTPRequestHandler):
                         merged[bk] = bv
                     settings["beszel"] = merged
                 elif k == "beszels" and isinstance(v, list):
-                    # multi-instance: preserve password per id when blank
+                    # multi-instance: preserve password per id when blank + auto-fill empty name via Beszel fetch
                     cur_list = cur_settings.get("beszels") or []
                     cur_by_id = {str(e.get("id")): e for e in cur_list if isinstance(e, dict) and e.get("id")}
                     merged_list = []
@@ -1328,6 +1328,30 @@ class HubHandler(BaseHTTPRequestHandler):
                         e = dict(entry)
                         if cur_entry and not e.get("password"):
                             e["password"] = cur_entry.get("password", "")
+                        # auto-fill empty name by fetching Beszel systems synchronously (try/except), fallback to URL host
+                        if not str(e.get("name") or "").strip() and e.get("url") and e.get("user") and e.get("password"):
+                            try:
+                                _cfg = {"url": str(e.get("url") or "").strip().rstrip("/"), "user": str(e.get("user") or ""), "password": str(e.get("password") or "")}
+                                systems = _beszel_systems(_cfg)
+                                if systems and isinstance(systems, list) and len(systems) > 0:
+                                    auto = systems[0].get("name") if isinstance(systems[0], dict) else None
+                                    if auto and str(auto).strip():
+                                        e["name"] = str(auto).strip()
+                                    else:
+                                        try:
+                                            e["name"] = urllib.parse.urlparse(e["url"]).hostname or e["url"]
+                                        except Exception:
+                                            e["name"] = e["url"]
+                                else:
+                                    try:
+                                        e["name"] = urllib.parse.urlparse(e["url"]).hostname or e["url"]
+                                    except Exception:
+                                        e["name"] = e["url"]
+                            except Exception:
+                                try:
+                                    e["name"] = urllib.parse.urlparse(e["url"]).hostname or e["url"]
+                                except Exception:
+                                    e["name"] = e["url"]
                         merged_list.append(e)
                     settings["beszels"] = merged_list
                 elif isinstance(v, dict) and isinstance(cur_settings.get(k), dict):
