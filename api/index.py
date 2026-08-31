@@ -156,7 +156,7 @@ def application(environ, start_response):
     # CRIT-05: if shared failed to init, return generic 500 config error (no leak)
     if _shared is None:
         body = b'{"error":"configuration error"}'
-        start_response("500 Internal Server Error", [("Content-Type", "application/json"), ("Content-Length", str(len(body))), ("X-Content-Type-Options", "nosniff"), ("X-Frame-Options", "SAMEORIGIN"), ("Referrer-Policy", "no-referrer"), ("Content-Security-Policy", "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com; font-src 'self' https://fonts.gstatic.com; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; connect-src 'self'; frame-ancestors 'self'"), ("Permissions-Policy", "camera=(), microphone=(), geolocation=()")])
+        start_response("500 Internal Server Error", [("Content-Type", "application/json"), ("Content-Length", str(len(body))), ("X-Content-Type-Options", "nosniff"), ("X-Frame-Options", "SAMEORIGIN"), ("Referrer-Policy", "no-referrer"), ("Content-Security-Policy", "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com; font-src 'self' https://fonts.gstatic.com; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; connect-src 'self' https: http:; frame-ancestors 'self'"), ("Permissions-Policy", "camera=(), microphone=(), geolocation=()")])
         return [body]
 
     # CRIT-02: per-request capture (thread-local) + per-request retry flag
@@ -278,7 +278,7 @@ def application(environ, start_response):
         ("X-Content-Type-Options", "nosniff"),
         ("X-Frame-Options", "SAMEORIGIN"),
         ("Referrer-Policy", "no-referrer"),
-        ("Content-Security-Policy", "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com; font-src 'self' https://fonts.gstatic.com; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; connect-src 'self'; frame-ancestors 'self'"),
+        ("Content-Security-Policy", "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com; font-src 'self' https://fonts.gstatic.com; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; connect-src 'self' https: http:; frame-ancestors 'self'"),
         ("Permissions-Policy", "camera=(), microphone=(), geolocation=()"),
     ]:
         if k.lower() not in header_keys:

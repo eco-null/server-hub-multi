@@ -103,8 +103,9 @@
       backdrop-filter: blur(18px) saturate(140%);
       -webkit-backdrop-filter: blur(18px) saturate(140%);
       border: 1px solid var(--border); border-radius: 16px;
-      transition: background-color 300ms var(--ease), border-color 300ms var(--ease);
+      overflow: hidden;
       isolation: isolate;
+      transition: background-color 300ms var(--ease), border-color 300ms var(--ease);
     }
     .section {
       animation: section-in 360ms var(--ease) both;
@@ -857,7 +858,7 @@
     }
     beszelListEl.innerHTML = '';
     if (!list.length) {
-      beszelListEl.innerHTML = '<p class="text-xs text-[color:var(--fg-muted)] py-2">No Beszel hubs yet. Click “+ Add Beszel”.</p>';
+      beszelListEl.innerHTML = '<p class="glass text-xs text-[color:var(--fg-muted)] py-4 text-center border-dashed" style="border-style:dashed">No Beszel hubs yet. Click “+ Add Beszel”.</p>';
       return;
     }
     list.forEach(entry => {

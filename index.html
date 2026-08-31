@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com; font-src 'self' https://fonts.gstatic.com; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; connect-src 'self' https: http:; frame-ancestors 'self'" />
   <title>Server Hub</title>
   <meta name="description" content="Server Hub — your apps and services, reachable from one place." />
   <link rel="icon" type="image/png" href="logo.png" />
@@ -99,7 +100,7 @@
     }
 
     * { -webkit-tap-highlight-color: transparent; }
-    html { -webkit-text-size-adjust: 100%; scrollbar-gutter: stable; }
+    html { -webkit-text-size-adjust: 100%; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: var(--border-hi) transparent; }
     html, body { background-color: var(--bg-deep); color: var(--fg); }
     body { overscroll-behavior-y: contain; }
     body {
@@ -121,6 +122,8 @@
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 16px;
+      overflow: hidden;
+      isolation: isolate;
       transition: background-color 300ms var(--ease), border-color 300ms var(--ease);
       contain: layout style;
     }
@@ -195,22 +198,23 @@
        }
        #groups .group { margin-top: 0 !important; }
        #groups .group.w-full { margin-bottom: 2rem; }
-       #groups .group:not(.w-full) {
-         display: inline-block !important;
-         width: calc(25% - 1.5rem) !important;
-         vertical-align: top;
-         margin-right: 1.5rem;
-         margin-bottom: 2rem;
-       }
-       #groups .group.w-full > div.grid {
-         grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-       }
-       #groups .group { container-type: inline-size; }
-       @container (min-width: 1000px) {
-         #groups .group.w-full > div.grid {
-           grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
-         }
-       }
+        #groups .group:not(.w-full) {
+          display: inline-block !important;
+          width: calc(25% - 1.5rem) !important;
+          vertical-align: top;
+          margin-right: 1.5rem;
+          margin-bottom: 2rem;
+        }
+        #groups .group:not(.w-full):nth-child(4n) { margin-right: 0 !important; }
+        #groups .group.w-full > div.grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        }
+         #groups { container-type:inline-size; }
+        @container (min-width: 720px) {
+          #groups .group.w-full > div.grid {
+            grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+          }
+        }
      }
 
      @media (max-width: 1023px) {
@@ -589,6 +593,7 @@
         <div class="glass skeleton-card p-3 skel flex-1 min-w-[240px]"></div>
       </div>
       <div id="groups" class="space-y-8"></div>
+      <p id="groups-empty" class="hidden mt-12 text-center text-[color:var(--fg-muted)]">No services yet — add link in Settings</p>
     </div>
 
     <p id="empty" class="hidden mt-12 text-center text-[color:var(--fg-muted)]">No services match “<span id="empty-term"></span>”.</p>
@@ -894,6 +899,10 @@
     const box = document.getElementById('bookmarks');
     if (!box) return;
     box.innerHTML = '';
+    if (BOOKMARKS.length === 0) {
+      box.innerHTML = '<span class="text-xs text-[color:var(--fg-muted)]">No bookmarks yet</span>';
+      return;
+    }
     BOOKMARKS.forEach(b => {
       const a = document.createElement('a');
       a.target = '_blank'; a.rel = 'noopener noreferrer';
@@ -913,6 +922,7 @@
       label.innerHTML = esc(b.name);
       a.appendChild(dot);
       a.appendChild(label);
+      box.appendChild(a);
     });
   }
 
@@ -1031,6 +1041,13 @@
     html += '</div>';
     groupsEl.innerHTML = html;
     skeletonsEl.classList.add('hidden');
+    // Empty state: show placeholder when no services (besides skeletons)
+    const groupsEmptyEl = document.getElementById('groups-empty');
+    if (groupsEmptyEl) {
+      const isEmpty = order.length === 0;
+      groupsEmptyEl.classList.toggle('hidden', !isEmpty);
+      groupsEl.classList.toggle('hidden', isEmpty);
+    }
 
     // Reveal: instant (opacity-only) — staggered timers caused main-thread jank and cursor stutter
     requestAnimationFrame(() => {
@@ -1496,7 +1513,18 @@
       try {
         return fetch(url, { mode: 'no-cors', signal: ctrl.signal, cache: 'no-store', redirect: 'follow' })
           .then(() => mark(dot, true, hostOf(url)))
-          .catch(err => { try { mark(dot, !(err instanceof DOMException && err.name === 'AbortError') ? false : 'timeout', hostOf(url)); } catch {} })
+          .catch(err => {
+            if (err instanceof DOMException && err.name === 'AbortError') { try { mark(dot, 'timeout', hostOf(url)); } catch {} return; }
+            // Fallback Image ping for CSP/CORS edge: if fetch blocked, try Image load
+            try {
+              let done = false;
+              const img = new Image();
+              const t2 = setTimeout(() => { if (!done) { done = true; try { img.src = ''; } catch {} mark(dot, false, hostOf(url)); } }, 3000);
+              img.onload = () => { if (done) return; done = true; clearTimeout(t2); mark(dot, true, hostOf(url)); };
+              img.onerror = () => { if (done) return; done = true; clearTimeout(t2); mark(dot, false, hostOf(url)); };
+              img.src = url;
+            } catch { try { mark(dot, false, hostOf(url)); } catch {} }
+          })
           .finally(() => { clearTimeout(tmo); _pingActive--; if (_pingQueue.length) try { _runPing(_pingQueue.shift()); } catch {} });
       } catch (e) {
         clearTimeout(tmo); _pingActive--; if (_pingQueue.length) try { _runPing(_pingQueue.shift()); } catch {}
@@ -1624,14 +1652,19 @@
     gridEl.innerHTML = '';
     const showUptime = window.HubSettings.get().features.beszelUptime !== false;
     // Handle both flat systems array and instances grouped {instances:[{name,systems}]}
+    // Avoid duplicate flatten — only one flatten path should fire.
     let systems = systemsOrInstances;
     if (systemsOrInstances && !Array.isArray(systemsOrInstances) && Array.isArray(systemsOrInstances.instances)) {
       systems = systemsOrInstances.instances.flatMap(i => i.systems || []);
     }
     if (!Array.isArray(systems)) systems = [];
-    // If backend returns instances wrapper inside array elements containing .systems, flatten
-    if (systems.length && systems[0] && Array.isArray(systems[0].systems)) {
+    // If backend returns instances wrapper inside array elements containing .systems, flatten once
+    if (systems.length && systems[0] && Array.isArray(systems[0].systems) && systems.every(x => x && Array.isArray(x.systems))) {
       systems = systems.flatMap(i => i.systems || []);
+    }
+    if (!systems.length) {
+      gridEl.innerHTML = '<p class="text-xs text-[color:var(--fg-muted)] col-span-2 py-2">No servers</p>';
+      return;
     }
     systems.forEach(s => {
       const up = formatUptime(s.uptime);
@@ -1690,6 +1723,14 @@
     const on = wallpaperIsCustom(window.HubSettings.get());
     themeBtn.disabled = on;
     themeBtn.classList.toggle('theme-btn-disabled', on);
+    if (on) {
+      themeBtn.setAttribute('title', 'Wallpaper overrides theme');
+      themeBtn.setAttribute('aria-label', 'Wallpaper overrides theme');
+    } else {
+      const mode = window.HubSettings.get().theme;
+      themeBtn.setAttribute('title', 'Theme: ' + mode + ' — click to cycle');
+      themeBtn.setAttribute('aria-label', 'Theme: ' + mode + ' (click to toggle)');
+    }
   }
   function cycleTheme() {
     if (wallpaperIsCustom(window.HubSettings.get())) return;

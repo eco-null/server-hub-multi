@@ -43,7 +43,7 @@ _URL_RE = re.compile(r"^https?://")
 _URL_RE_I = re.compile(r"^https?://", re.IGNORECASE)
 
 # Security header constants (avoid rebuilding per request)
-CSP_VALUE = "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com; font-src 'self' https://fonts.gstatic.com; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; connect-src 'self'; frame-ancestors 'self'"
+CSP_VALUE = "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com; font-src 'self' https://fonts.gstatic.com; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; connect-src 'self' https: http:; frame-ancestors 'self'"
 PERM_POLICY = "camera=(), microphone=(), geolocation=()"
 SEC_HEADERS = (
     ("X-Content-Type-Options", "nosniff"),

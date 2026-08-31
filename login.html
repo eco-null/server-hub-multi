@@ -297,12 +297,12 @@
       <p class="sub" id="card-sub">Sign in to your workspace.</p>
 
       <div class="tabs" role="tablist" aria-label="Authentication">
-        <button class="tab active" id="tab-login" role="tab" aria-selected="true">Sign in</button>
-        <button class="tab" id="tab-signup" role="tab" aria-selected="false">Create account</button>
+        <button class="tab active" id="tab-login" role="tab" aria-selected="true" aria-controls="panel-login" tabindex="0">Sign in</button>
+        <button class="tab" id="tab-signup" role="tab" aria-selected="false" aria-controls="panel-signup" tabindex="-1">Create account</button>
       </div>
 
       <div class="panel-wrap">
-        <div class="panel active" id="panel-login" role="tabpanel">
+        <div class="panel active" id="panel-login" role="tabpanel" aria-labelledby="tab-login" tabindex="0">
           <form method="post" action="/login" id="login-form" autocomplete="on" novalidate>
             <div id="login-fields">
               <label>
@@ -338,7 +338,7 @@
           <p id="error-expired" class="error hidden">Session expired. Please sign in again.</p>
         </div>
 
-        <div class="panel hidden" id="panel-signup" role="tabpanel">
+        <div class="panel hidden" id="panel-signup" role="tabpanel" aria-labelledby="tab-signup" tabindex="0">
           <form method="post" action="/register" id="signup-form" autocomplete="on" novalidate>
             <label>
               Email
@@ -442,8 +442,10 @@
         function showLogin() {
           tabLogin.classList.add("active");
           tabLogin.setAttribute("aria-selected", "true");
+          tabLogin.setAttribute("tabindex", "0");
           tabSignup.classList.remove("active");
           tabSignup.setAttribute("aria-selected", "false");
+          tabSignup.setAttribute("tabindex", "-1");
           title.textContent = "Welcome back";
           sub.textContent = "Sign in to your workspace.";
           if (panelSignup.classList.contains("active")) {
@@ -459,8 +461,10 @@
         function showSignup() {
           tabSignup.classList.add("active");
           tabSignup.setAttribute("aria-selected", "true");
+          tabSignup.setAttribute("tabindex", "0");
           tabLogin.classList.remove("active");
           tabLogin.setAttribute("aria-selected", "false");
+          tabLogin.setAttribute("tabindex", "-1");
           title.textContent = "Create account";
           sub.textContent = "Start your workspace.";
           if (panelLogin.classList.contains("active")) {
